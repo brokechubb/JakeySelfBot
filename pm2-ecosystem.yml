@@ -1,0 +1,32 @@
+apps:
+  - name: "jakey-mcp-server"
+    script: "tools/mcp_memory_server.py"
+    interpreter: "venv/bin/python"
+    exec_mode: "fork"
+    instances: 1
+    watch: false
+    # Ensure the MCP server starts before the main bot
+    wait_ready: true
+    listen_timeout: 5000
+    kill_timeout: 3000
+    env:
+      PYTHONUNBUFFERED: 1
+
+  - name: "jakey-self-bot"
+    script: "main.py"
+    interpreter: "venv/bin/python"
+    exec_mode: "fork"
+    instances: 1
+    watch: true
+    ignore_watch:
+      - "node_modules"
+      - ".git"
+      - "*.log"
+      - ".mcp_port" # Ignore the port file
+    # Wait for the MCP server to be ready before starting the bot
+    wait_ready: true
+    listen_timeout: 5000
+    kill_timeout: 3000
+    env:
+      PYTHONUNBUFFERED: 1
+      # Add any other environment variables here if not using .env file

@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: jakey-searxng
+    restart: unless-stopped
+    ports:
+      - "8086:8080"
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-$(openssl rand -hex 32)}
+      - SEARXNG_REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    networks:
+      - searxng-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: jakey-searxng-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - searxng-network
+
+volumes:
+  redis-data:
+
+networks:
+  searxng-network:
+    driver: bridge

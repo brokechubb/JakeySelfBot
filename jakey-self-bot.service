@@ -1,0 +1,29 @@
+[Unit]
+Description=Jakey Self-Bot
+After=network.target jakey-mcp-server.service
+Requires=network.target jakey-mcp-server.service
+
+[Service]
+Type=simple
+User=chubb
+Group=chubb
+WorkingDirectory=/home/chubb/bots/JakeySelfBot
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/chubb/bots/JakeySelfBot/venv/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/bin/bash -c 'cd /home/chubb/bots/JakeySelfBot && source venv/bin/activate && pip install -r requirements.txt'
+ExecStart=/home/chubb/bots/JakeySelfBot/venv/bin/python /home/chubb/bots/JakeySelfBot/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jakey-self-bot
+
+# Security settings (less restrictive)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/chubb/bots/JakeySelfBot /tmp
+
+[Install]
+WantedBy=multi-user.target

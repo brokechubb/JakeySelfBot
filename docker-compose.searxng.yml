@@ -1,0 +1,22 @@
+version: "3.7"
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "8086:8080"
+    environment:
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-188dcc8952a7ef7a8b0df33daac829a9e4044875b0513c65218d64298e1fcc6d}
+      - SEARXNG_BASE_URL=http://localhost:8086/
+      - SEARXNG_IMAGE_PROXY=true
+      - SEARXNG_ENABLE_METRICS=false
+      - SEARXNG_DEBUG=false
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml
+    networks:
+      - searxng_net
+
+networks:
+  searxng_net:
+    driver: bridge

@@ -1,0 +1,8 @@
+discord.py-self
+requests
+beautifulsoup4
+python-dotenv
+aiohttp
+pytz
+yfinance
+aiosqlite
