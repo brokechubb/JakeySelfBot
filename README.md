@@ -85,10 +85,31 @@ Jakey isn't just another Discord bot - he's your degenerate research assistant, 
 
 **In short**: Jakey turns your Discord server into a research lab, financial dashboard, entertainment center, and AI assistant - all while keeping you entertained with his degenerate personality. 🎰🔍💰
 
+## ⚠️ Important Warnings
+
+### 🤖 AI Model & Content
+- **Uncensored AI**: Jakey uses uncensored AI models that can generate explicit, offensive, or controversial content
+- **No Content Filtering**: Unlike mainstream AI services, Jakey has minimal content restrictions
+- **User Responsibility**: All generated content is the responsibility of the user - use discretion
+- **Degenerate Personality**: Jake's responses reflect his cynical, gambling-obsessed persona
+
+### 🚨 Self-Bot Risks & Legal Notice
+**Self-botting violates Discord's Terms of Service and can result in account suspension or permanent bans.**
+
+- **Account Risks**: Using self-bots can lead to Discord account termination
+- **Legal Gray Area**: Self-botting exists in a legal gray area and is not officially supported
+- **Educational Use Only**: This project is for educational and personal use only
+- **No Warranty**: Use at your own risk - the developers are not responsible for account issues
+- **Rate Limiting**: Discord actively detects and blocks self-bot behavior
+- **API Changes**: Discord frequently updates their API, potentially breaking self-bot functionality
+
+**Bottom line**: Self-botting is risky business. Use Jakey responsibly and be prepared for potential consequences. Everything is rigged, but at least you were warned! ⚠️🚫
+
 ## 📋 Table of Contents
 
 - [About 📖](#about-)
 - [What Jakey Can Do For You 🎯](#-what-jakey-can-do-for-you)
+- [Important Warnings ⚠️](#️-important-warnings)
 - [Production Status 🚀](#-production-status)
 - [Project Structure 📁](#-project-structure)
 - [Key Features ✨](#-key-features)
@@ -342,6 +363,9 @@ Complete documentation suite in [`docs/`](docs/) covering all features, APIs, an
 - **CRITICAL**: Uses `discord.py-self` (NOT regular `discord.py`) - never add `intents=` parameter
 - **Self-Bot**: Runs on user accounts, not bot applications
 - **Educational**: For learning and personal use only
+- **Uncensored AI**: Generates explicit/controversial content - user discretion advised
+- **Account Risk**: Self-botting violates Discord ToS - use at your own risk
+- **No Warranty**: Developers not responsible for account suspensions or bans
 
 ---
 
