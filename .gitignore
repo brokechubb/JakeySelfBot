@@ -145,3 +145,6 @@ config.local.py
 *.log
 
 .mcp_token
+
+# Backups
+backups/
