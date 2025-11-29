@@ -148,3 +148,5 @@ config.local.py
 
 # Backups
 backups/
+
+.claude/
