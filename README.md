@@ -402,6 +402,20 @@ Complete documentation suite in [`docs/`](docs/) covering all features, APIs, an
 - **Account Risk**: Self-botting violates Discord ToS - use at your own risk
 - **No Warranty**: Developers not responsible for account suspensions or bans
 
+## 📄 License
+
+This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
+
+### What this means:
+
+- ✅ **Freedom**: You can use, modify, and distribute the software
+- ✅ **Open Source**: All source code is available and transparent
+- ✅ **Copyleft**: Derivative works must also be licensed under GPLv3
+- ✅ **No Warranty**: Software is provided "as is" without guarantees
+- ✅ **Community**: Contributions and improvements are welcome
+
+For more information about GPLv3, visit [https://www.gnu.org/licenses/gpl-3.0](https://www.gnu.org/licenses/gpl-3.0)
+
 ---
 
 **Built with ❤️ by [brokechubb](https://github.com/brokechubb)**
