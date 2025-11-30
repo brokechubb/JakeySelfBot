@@ -26,6 +26,7 @@ The airdrop system can be configured through environment variables in your `.env
 - `AIRDROP_IGNORE_DROPS_UNDER` (default: 0.0) - Ignore drops worth less than this amount
 - `AIRDROP_IGNORE_TIME_UNDER` (default: 0.0) - Ignore drops with less than this time remaining
 - `AIRDROP_IGNORE_USERS` (default: "") - Comma-separated list of user IDs to ignore
+- `AIRDROP_SERVER_WHITELIST` (default: "") - Comma-separated list of server IDs where airdrops should be collected
 
 ### Drop Type Toggles
 - `AIRDROP_DISABLE_AIRDROP` (default: false) - Disable standard airdrop claiming
@@ -40,13 +41,14 @@ The airdrop system can be configured through environment variables in your `.env
 
 ## How It Works
 
-1. **Detection**: The bot monitors all channels it has access to for airdrop commands (`$airdrop`, `$triviadrop`, etc.)
-2. **Response Waiting**: It waits for the tip.cc bot to respond with the actual drop message (up to 15 seconds)
-3. **Delay Application**: Applies configured delays before claiming (smart, range, or fixed)
-4. **Claim Execution**: Automatically claims the drop using appropriate methods:
+1. **Server Filtering**: Checks if the server is in the whitelist (if configured)
+2. **Detection**: The bot monitors all channels it has access to for airdrop commands (`$airdrop`, `$triviadrop`, etc.)
+3. **Response Waiting**: It waits for the tip.cc bot to respond with the actual drop message (up to 15 seconds)
+4. **Delay Application**: Applies configured delays before claiming (smart, range, or fixed)
+5. **Claim Execution**: Automatically claims the drop using appropriate methods:
    - Button clicks for standard airdrops and red packets
    - Automated responses for phrase, math, and trivia drops
-5. **Retry Logic**: Implements retry logic with exponential backoff for failed interactions
+6. **Retry Logic**: Implements retry logic with exponential backoff for failed interactions
 
 ## Error Handling
 
@@ -63,6 +65,28 @@ The system includes robust error handling:
 - The bot must have permission to read messages and send messages in drop channels
 - The tip.cc bot must be active and functioning properly
 
+## Server Whitelist
+
+The server whitelist feature allows you to restrict airdrop collection to specific Discord servers only:
+
+### Configuration
+```bash
+# Only collect airdrops in specific servers
+AIRDROP_SERVER_WHITELIST=123456789012345678,987654321098765432
+
+# Collect in all servers (default)
+AIRDROP_SERVER_WHITELIST=
+```
+
+### Behavior
+- **Empty whitelist**: Bot collects airdrops in all servers
+- **Populated whitelist**: Bot ONLY collects in specified servers
+- **Status Display**: Use `%airdrop` command to see whitelist status
+
+### How to Get Server IDs
+1. Enable Developer Mode in Discord settings
+2. Right-click on server name → "Copy Server ID"
+
 ## Best Practices
 
 1. **Rate Limiting**: Configure appropriate delays to avoid being rate-limited
@@ -70,3 +94,4 @@ The system includes robust error handling:
 3. **Monitoring**: Regularly check logs for failed claims
 4. **Value Filtering**: Use `AIRDROP_IGNORE_DROPS_UNDER` to avoid claiming low-value drops
 5. **Selective Participation**: Disable specific drop types that may not be worth your time
+6. **Server Control**: Use the whitelist to focus on specific communities and reduce bot load

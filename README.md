@@ -44,7 +44,7 @@ Holy shit, this project is my baby - a wild ride through full-stack development 
 ### 🎰 **The Fun Stuff**
 
 - **Crypto Tipping**: tip.cc integration with balance tracking
-- **Airdrop Automation**: Smart claiming system with retry logic
+- **Airdrop Automation**: Smart claiming system with server whitelist support and retry logic
 - **Gambling Tools**: Keno generator, bonus schedules, financial calcs
 - **Memory System**: Remembers your shit so conversations make sense
 

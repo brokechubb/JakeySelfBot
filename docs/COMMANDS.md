@@ -228,7 +228,7 @@ Show current airdrop configuration and status.
 
 **Usage**: `%airdropstatus`
 
-**Response**: Shows airdrop settings, rates, and current status.
+**Response**: Shows airdrop settings, rates, server whitelist status, and current status.
 
 ### %channelstats
 

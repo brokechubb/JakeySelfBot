@@ -52,7 +52,7 @@ Welcome to the comprehensive documentation for Jakey, the degenerate gambling Di
 - Professional image generation with 49 artistic styles
 - Self-hosted SearXNG web search
 - Comprehensive tip.cc integration with balance tracking
-- Automated airdrop claiming
+- Automated airdrop claiming with server whitelist support
 - AI-powered welcome messages
 - Rate-limited API integration
 - Secure admin command system

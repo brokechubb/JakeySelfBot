@@ -1477,6 +1477,7 @@ def setup_commands(bot_instance):
             AIRDROP_IGNORE_DROPS_UNDER,
             AIRDROP_IGNORE_TIME_UNDER,
             AIRDROP_IGNORE_USERS,
+            AIRDROP_SERVER_WHITELIST,
             AIRDROP_DISABLE_AIRDROP,
             AIRDROP_DISABLE_TRIVIADROP,
             AIRDROP_DISABLE_MATHDROP,
@@ -1495,7 +1496,15 @@ def setup_commands(bot_instance):
             f"• Range Delay: {'Enabled' if AIRDROP_RANGE_DELAY else 'Disabled'}\n"
         )
         response += f"• Delay Range: {AIRDROP_DELAY_MIN}-{AIRDROP_DELAY_MAX}s\n"
-        response += f"• CPM: {AIRDROP_CPM_MIN}-{AIRDROP_CPM_MAX}\n\n"
+        response += f"• CPM: {AIRDROP_CPM_MIN}-{AIRDROP_CPM_MAX}\n"
+        
+        # Show whitelist status
+        if AIRDROP_SERVER_WHITELIST:
+            whitelist_servers = [s.strip() for s in AIRDROP_SERVER_WHITELIST.split(",") if s.strip()]
+            response += f"• Server Whitelist: Enabled ({len(whitelist_servers)} servers)\n"
+        else:
+            response += "• Server Whitelist: Disabled (all servers)\n"
+        response += "\n"
 
         # Show disabled features
         disabled_features = []
