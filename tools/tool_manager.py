@@ -1,18 +1,21 @@
+import logging
+import os
+import random
 import sys
 import time
-import random
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin
+
+import pytz
 import requests
 import yfinance as yf
-import pytz
-import logging
-from typing import List, Dict, Optional, Any
-from pathlib import Path
-from datetime import datetime
-from urllib.parse import urljoin
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import COINMARKETCAP_API_KEY, SEARXNG_URL, MCP_MEMORY_ENABLED
+from config import COINMARKETCAP_API_KEY, MCP_MEMORY_ENABLED, SEARXNG_URL
+
 from .discord_tools import DiscordTools
 
 logger = logging.getLogger(__name__)
@@ -20,14 +23,15 @@ logger = logging.getLogger(__name__)
 # Import rate limiter
 try:
     from .rate_limiter import rate_limit_middleware
+
     RATE_LIMITING_ENABLED = True
 except ImportError:
     logger.warning("Rate limiter not available, using fallback rate limiting")
     RATE_LIMITING_ENABLED = False
 
+
 class ToolManager:
     def __init__(self):
-
         self.tools = {
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
@@ -61,7 +65,7 @@ class ToolManager:
             # Rate limiting tools
             "get_user_rate_limit_status": self.get_user_rate_limit_status,
             "get_system_rate_limit_stats": self.get_system_rate_limit_stats,
-            "reset_user_rate_limits": self.reset_user_rate_limits
+            "reset_user_rate_limits": self.reset_user_rate_limits,
         }
 
         # Initialize Discord tools - will be set later by main.py after bot initialization
@@ -108,30 +112,30 @@ class ToolManager:
             "stake.us_weekly": "Saturday 12:30 PM UTC",
             "stake.us_monthly": "Around the 15th of each month (varies by VIP)",
             "shuffle_weekly": "Thursday 11:00 AM UTC",
-            "shuffle_monthly": "First Friday 12:00 AM UTC"
+            "shuffle_monthly": "First Friday 12:00 AM UTC",
         }
 
         # Add rate limiting for tools
         self.last_call_time = {}
         self.rate_limits = {
-            "crypto_price": 1.0,     # 1 second between calls
-            "stock_price": 1.0,      # 1 second between calls
-            "tip_user": 1.0,         # 1 second between calls
-            "check_balance": 1.0,    # 1 second between calls
-            "get_bonus_schedule": 1.0, # 1 second between calls
-            "web_search": 2.0,       # 2 seconds between calls
-            "company_research": 2.0, # 2 seconds between calls
-            "crawling": 2.0,         # 2 seconds between calls
-            "generate_image": 5.0,   # 5 seconds between calls
-            "analyze_image": 5.0,    # 5 seconds between calls
-            "calculate": 0.1,        # 0.1 seconds between calls
-            "get_current_time": 0.1, # 0.1 seconds between calls
-            "set_reminder": 1.0,     # 1 second between calls
-            "list_reminders": 1.0,   # 1 second between calls
+            "crypto_price": 1.0,  # 1 second between calls
+            "stock_price": 1.0,  # 1 second between calls
+            "tip_user": 1.0,  # 1 second between calls
+            "check_balance": 1.0,  # 1 second between calls
+            "get_bonus_schedule": 1.0,  # 1 second between calls
+            "web_search": 2.0,  # 2 seconds between calls
+            "company_research": 2.0,  # 2 seconds between calls
+            "crawling": 2.0,  # 2 seconds between calls
+            "generate_image": 5.0,  # 5 seconds between calls
+            "analyze_image": 5.0,  # 5 seconds between calls
+            "calculate": 0.1,  # 0.1 seconds between calls
+            "get_current_time": 0.1,  # 0.1 seconds between calls
+            "set_reminder": 1.0,  # 1 second between calls
+            "list_reminders": 1.0,  # 1 second between calls
             "cancel_reminder": 1.0,  # 1 second between calls
-            "check_due_reminders": 5.0, # 5 seconds between calls (background task)
+            "check_due_reminders": 5.0,  # 5 seconds between calls (background task)
             "remember_user_info": 1.0,  # 1 second between calls
-            "remember_user_mcp": 1.0,   # 1 second between calls
+            "remember_user_mcp": 1.0,  # 1 second between calls
             "search_user_memory": 0.1,  # 0.1 seconds between calls
             # Discord tool rate limits
             "discord_get_user_info": 1.0,
@@ -141,7 +145,7 @@ class ToolManager:
             "discord_search_messages": 1.0,
             "discord_list_guild_members": 1.0,
             "discord_send_message": 1.0,
-            "discord_send_dm": 1.0
+            "discord_send_dm": 1.0,
         }
 
     def _validate_crypto_symbol(self, symbol: str) -> bool:
@@ -150,55 +154,67 @@ class ToolManager:
             # Import here to avoid circular imports
             import sys
             from pathlib import Path
+
             sys.path.insert(0, str(Path(__file__).parent.parent))
             from utils.security_validator import validator
-            is_valid, _ = validator.validate_crypto_symbol(symbol)
+
+            is_valid, _ = validator.validate_cryptocurrency_symbol(symbol)
             return is_valid
         except ImportError:
             # Fallback to basic validation if security validator not available
             import re
-            return bool(re.match(r'^[A-Z0-9]{1,10}$', symbol.upper()))
+
+            return bool(re.match(r"^[A-Z0-9]{1,10}$", symbol.upper()))
 
     def _validate_currency_code(self, currency: str) -> bool:
         """Validate currency code using security framework."""
         try:
             import sys
             from pathlib import Path
+
             sys.path.insert(0, str(Path(__file__).parent.parent))
             from utils.security_validator import validator
+
             is_valid, _ = validator.validate_currency_code(currency)
             return is_valid
         except ImportError:
             # Fallback validation
             import re
-            return bool(re.match(r'^[A-Z]{3}$', currency.upper()))
+
+            return bool(re.match(r"^[A-Z]{3}$", currency.upper()))
 
     def _validate_search_query(self, query: str) -> bool:
         """Validate search query using security framework."""
         try:
             import sys
             from pathlib import Path
+
             sys.path.insert(0, str(Path(__file__).parent.parent))
             from utils.security_validator import validator
+
             is_valid, _ = validator.validate_search_query(query)
             return is_valid
         except ImportError:
             # Fallback validation
-            return bool(query and len(query.strip()) <= 1000 and '\x00' not in query)
+            return bool(query and len(query.strip()) <= 1000 and "\x00" not in query)
 
     def _check_rate_limit(self, tool_name: str, user_id: str = "system") -> bool:
         """Check if tool can be called based on per-user rate limits"""
         # Check per-user rate limits first if available
         if RATE_LIMITING_ENABLED:
             try:
-                is_allowed, violation_reason = rate_limit_middleware.check_request(user_id, tool_name)
+                is_allowed, violation_reason = rate_limit_middleware.check_request(
+                    user_id, tool_name
+                )
                 if not is_allowed:
-                    logger.warning(f"Rate limit violation for user {user_id}: {violation_reason}")
+                    logger.warning(
+                        f"Rate limit violation for user {user_id}: {violation_reason}"
+                    )
                     return False
             except Exception as e:
                 logger.error(f"Error checking per-user rate limit: {e}")
                 # Fall back to global rate limiting on error
-        
+
         # Fall back to global rate limits for backward compatibility
         current_time = time.time()
         if tool_name in self.last_call_time:
@@ -221,37 +237,43 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID who owns the reminder"
+                                "description": "Discord user ID who owns the reminder",
                             },
                             "reminder_type": {
                                 "type": "string",
                                 "description": "Type of reminder: 'alarm', 'timer', or 'reminder'",
-                                "enum": ["alarm", "timer", "reminder"]
+                                "enum": ["alarm", "timer", "reminder"],
                             },
                             "title": {
                                 "type": "string",
-                                "description": "Title of the reminder"
+                                "description": "Title of the reminder",
                             },
                             "description": {
                                 "type": "string",
-                                "description": "Detailed description of what the reminder is about"
+                                "description": "Detailed description of what the reminder is about",
                             },
                             "trigger_time": {
                                 "type": "string",
-                                "description": "ISO 8601 formatted time when the reminder should trigger (e.g., '2025-10-03T15:00:00Z')"
+                                "description": "ISO 8601 formatted time when the reminder should trigger (e.g., '2025-10-03T15:00:00Z')",
                             },
                             "channel_id": {
                                 "type": "string",
-                                "description": "Optional Discord channel ID to send reminder to"
+                                "description": "Optional Discord channel ID to send reminder to",
                             },
                             "recurring_pattern": {
                                 "type": "string",
-                                "description": "Optional recurring pattern (daily, weekly, monthly)"
-                            }
+                                "description": "Optional recurring pattern (daily, weekly, monthly)",
+                            },
                         },
-                        "required": ["user_id", "reminder_type", "title", "description", "trigger_time"]
-                    }
-                }
+                        "required": [
+                            "user_id",
+                            "reminder_type",
+                            "title",
+                            "description",
+                            "trigger_time",
+                        ],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -263,12 +285,12 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID whose reminders to list"
+                                "description": "Discord user ID whose reminders to list",
                             }
                         },
-                        "required": ["user_id"]
-                    }
-                }
+                        "required": ["user_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -280,27 +302,24 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID who owns the reminder"
+                                "description": "Discord user ID who owns the reminder",
                             },
                             "reminder_id": {
                                 "type": "integer",
-                                "description": "ID of the reminder to cancel"
-                            }
+                                "description": "ID of the reminder to cancel",
+                            },
                         },
-                        "required": ["user_id", "reminder_id"]
-                    }
-                }
+                        "required": ["user_id", "reminder_id"],
+                    },
+                },
             },
             {
                 "type": "function",
                 "function": {
                     "name": "check_due_reminders",
                     "description": "Check for any due reminders (used by background tasks)",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
+                    "parameters": {"type": "object", "properties": {}},
+                },
             },
             {
                 "type": "function",
@@ -312,20 +331,20 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID"
+                                "description": "Discord user ID",
                             },
                             "information_type": {
                                 "type": "string",
-                                "description": "Type of information to remember (e.g., preference, fact, habit)"
+                                "description": "Type of information to remember (e.g., preference, fact, habit)",
                             },
                             "information": {
                                 "type": "string",
-                                "description": "The actual information to remember"
-                            }
+                                "description": "The actual information to remember",
+                            },
                         },
-                        "required": ["user_id", "information_type", "information"]
-                    }
-                }
+                        "required": ["user_id", "information_type", "information"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -337,16 +356,16 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID"
+                                "description": "Discord user ID",
                             },
                             "query": {
                                 "type": "string",
-                                "description": "Search query to find relevant memories"
-                            }
+                                "description": "Search query to find relevant memories",
+                            },
                         },
-                        "required": ["user_id"]
-                    }
-                }
+                        "required": ["user_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -358,17 +377,17 @@ class ToolManager:
                         "properties": {
                             "symbol": {
                                 "type": "string",
-                                "description": "Cryptocurrency symbol (e.g., BTC, ETH, DOGE)"
+                                "description": "Cryptocurrency symbol (e.g., BTC, ETH, DOGE)",
                             },
                             "currency": {
                                 "type": "string",
                                 "description": "Currency to convert to (e.g., USD, EUR, GBP)",
-                                "default": "USD"
-                            }
+                                "default": "USD",
+                            },
                         },
-                        "required": ["symbol"]
-                    }
-                }
+                        "required": ["symbol"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -380,12 +399,12 @@ class ToolManager:
                         "properties": {
                             "symbol": {
                                 "type": "string",
-                                "description": "Stock symbol (e.g., AAPL, GOOGL, TSLA)"
+                                "description": "Stock symbol (e.g., AAPL, GOOGL, TSLA)",
                             }
                         },
-                        "required": ["symbol"]
-                    }
-                }
+                        "required": ["symbol"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -397,25 +416,25 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID of the recipient"
+                                "description": "Discord user ID of the recipient",
                             },
                             "amount": {
                                 "type": "string",
-                                "description": "Amount to tip (e.g., '100' or '5.5')"
+                                "description": "Amount to tip (e.g., '100' or '5.5')",
                             },
                             "currency": {
                                 "type": "string",
                                 "description": "Currency to tip in (e.g., 'DOGE', 'BTC', 'USD')",
-                                "default": "DOGE"
+                                "default": "DOGE",
                             },
                             "message": {
                                 "type": "string",
-                                "description": "Optional message to include with the tip"
-                            }
+                                "description": "Optional message to include with the tip",
+                            },
                         },
-                        "required": ["user_id", "amount"]
-                    }
-                }
+                        "required": ["user_id", "amount"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -427,12 +446,12 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID"
+                                "description": "Discord user ID",
                             }
                         },
-                        "required": ["user_id"]
-                    }
-                }
+                        "required": ["user_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -444,17 +463,17 @@ class ToolManager:
                         "properties": {
                             "site": {
                                 "type": "string",
-                                "description": "Gambling site name (e.g., 'stake', 'bitsler', 'freebitco.in')"
+                                "description": "Gambling site name (e.g., 'stake', 'bitsler', 'freebitco.in')",
                             },
                             "frequency": {
                                 "type": "string",
                                 "description": "Bonus frequency (daily, weekly, monthly, hourly)",
-                                "enum": ["daily", "weekly", "monthly", "hourly"]
-                            }
+                                "enum": ["daily", "weekly", "monthly", "hourly"],
+                            },
                         },
-                        "required": ["site", "frequency"]
-                    }
-                }
+                        "required": ["site", "frequency"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -464,14 +483,11 @@ class ToolManager:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Search query"
-                            }
+                            "query": {"type": "string", "description": "Search query"}
                         },
-                        "required": ["query"]
-                    }
-                }
+                        "required": ["query"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -483,12 +499,12 @@ class ToolManager:
                         "properties": {
                             "company_name": {
                                 "type": "string",
-                                "description": "Name of the company to research"
+                                "description": "Name of the company to research",
                             }
                         },
-                        "required": ["company_name"]
-                    }
-                }
+                        "required": ["company_name"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -498,19 +514,16 @@ class ToolManager:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "url": {
-                                "type": "string",
-                                "description": "URL to crawl"
-                            },
+                            "url": {"type": "string", "description": "URL to crawl"},
                             "max_characters": {
                                 "type": "integer",
                                 "description": "Maximum number of characters to extract",
-                                "default": 3000
-                            }
+                                "default": 3000,
+                            },
                         },
-                        "required": ["url"]
-                    }
-                }
+                        "required": ["url"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -522,27 +535,27 @@ class ToolManager:
                         "properties": {
                             "prompt": {
                                 "type": "string",
-                                "description": "Image generation prompt"
+                                "description": "Image generation prompt",
                             },
                             "model": {
                                 "type": "string",
                                 "description": "Model to use for generation",
-                                "default": "SDXL 1.0"
+                                "default": "SDXL 1.0",
                             },
                             "width": {
                                 "type": "integer",
                                 "description": "Image width in pixels (converted to aspect ratio)",
-                                "default": 1024
+                                "default": 1024,
                             },
                             "height": {
                                 "type": "integer",
                                 "description": "Image height in pixels (converted to aspect ratio)",
-                                "default": 1024
-                            }
+                                "default": 1024,
+                            },
                         },
-                        "required": ["prompt"]
-                    }
-                }
+                        "required": ["prompt"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -554,17 +567,17 @@ class ToolManager:
                         "properties": {
                             "image_url": {
                                 "type": "string",
-                                "description": "URL of the image to analyze"
+                                "description": "URL of the image to analyze",
                             },
                             "prompt": {
                                 "type": "string",
                                 "description": "Prompt for image analysis",
-                                "default": "Describe this image"
-                            }
+                                "default": "Describe this image",
+                            },
                         },
-                        "required": ["image_url"]
-                    }
-                }
+                        "required": ["image_url"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -576,12 +589,12 @@ class ToolManager:
                         "properties": {
                             "expression": {
                                 "type": "string",
-                                "description": "Mathematical expression to calculate (supports basic operations +, -, *, / and comparisons >, <, >=, <=, ==, !=)"
+                                "description": "Mathematical expression to calculate (supports basic operations +, -, *, / and comparisons >, <, >=, <=, ==, !=)",
                             }
                         },
-                        "required": ["expression"]
-                    }
-                }
+                        "required": ["expression"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -594,11 +607,11 @@ class ToolManager:
                             "timezone": {
                                 "type": "string",
                                 "description": "Timezone name or alias (e.g., 'UTC', 'EST', 'US/Eastern', 'Europe/London')",
-                                "default": "UTC"
+                                "default": "UTC",
                             }
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             },
             {
                 "type": "function",
@@ -610,20 +623,20 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID"
+                                "description": "Discord user ID",
                             },
                             "information_type": {
                                 "type": "string",
-                                "description": "Type of information (e.g. 'preference', 'fact', 'reminder')"
+                                "description": "Type of information (e.g. 'preference', 'fact', 'reminder')",
                             },
                             "information": {
                                 "type": "string",
-                                "description": "The information to remember"
-                            }
+                                "description": "The information to remember",
+                            },
                         },
-                        "required": ["user_id", "information_type", "information"]
-                    }
-                }
+                        "required": ["user_id", "information_type", "information"],
+                    },
+                },
             },
             # Discord tools
             {
@@ -631,24 +644,16 @@ class ToolManager:
                 "function": {
                     "name": "discord_get_user_info",
                     "description": "Get information about the currently logged-in Discord user",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                }
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
             },
             {
                 "type": "function",
                 "function": {
                     "name": "discord_list_guilds",
                     "description": "List all Discord servers/guilds the user is in",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                }
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
             },
             {
                 "type": "function",
@@ -660,11 +665,11 @@ class ToolManager:
                         "properties": {
                             "guild_id": {
                                 "type": "string",
-                                "description": "Optional: Filter channels by guild ID"
+                                "description": "Optional: Filter channels by guild ID",
                             }
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             },
             {
                 "type": "function",
@@ -676,16 +681,16 @@ class ToolManager:
                         "properties": {
                             "channel_id": {
                                 "type": "string",
-                                "description": "The Discord channel ID to read messages from"
+                                "description": "The Discord channel ID to read messages from",
                             },
                             "limit": {
                                 "type": "number",
-                                "description": "Number of messages to fetch (default: 50, max: 100)"
-                            }
+                                "description": "Number of messages to fetch (default: 50, max: 100)",
+                            },
                         },
-                        "required": ["channel_id"]
-                    }
-                }
+                        "required": ["channel_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -697,24 +702,24 @@ class ToolManager:
                         "properties": {
                             "channel_id": {
                                 "type": "string",
-                                "description": "The Discord channel ID to search messages in"
+                                "description": "The Discord channel ID to search messages in",
                             },
                             "query": {
                                 "type": "string",
-                                "description": "Text to search for in message content"
+                                "description": "Text to search for in message content",
                             },
                             "author_id": {
                                 "type": "string",
-                                "description": "Optional: Filter by author ID"
+                                "description": "Optional: Filter by author ID",
                             },
                             "limit": {
                                 "type": "number",
-                                "description": "Number of messages to search through (default: 100, max: 500)"
-                            }
+                                "description": "Number of messages to search through (default: 100, max: 500)",
+                            },
                         },
-                        "required": ["channel_id"]
-                    }
-                }
+                        "required": ["channel_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -726,20 +731,20 @@ class ToolManager:
                         "properties": {
                             "guild_id": {
                                 "type": "string",
-                                "description": "The Discord guild ID to list members from"
+                                "description": "The Discord guild ID to list members from",
                             },
                             "limit": {
                                 "type": "number",
-                                "description": "Number of members to fetch (default: 100, max: 1000)"
+                                "description": "Number of members to fetch (default: 100, max: 1000)",
                             },
                             "include_roles": {
                                 "type": "boolean",
-                                "description": "Whether to include role information for each member"
-                            }
+                                "description": "Whether to include role information for each member",
+                            },
                         },
-                        "required": ["guild_id"]
-                    }
-                }
+                        "required": ["guild_id"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -751,20 +756,20 @@ class ToolManager:
                         "properties": {
                             "channel_id": {
                                 "type": "string",
-                                "description": "The Discord channel ID to send the message to"
+                                "description": "The Discord channel ID to send the message to",
                             },
                             "content": {
                                 "type": "string",
-                                "description": "The message content to send"
+                                "description": "The message content to send",
                             },
                             "reply_to_message_id": {
                                 "type": "string",
-                                "description": "Optional: Message ID to reply to"
-                            }
+                                "description": "Optional: Message ID to reply to",
+                            },
                         },
-                        "required": ["channel_id", "content"]
-                    }
-                }
+                        "required": ["channel_id", "content"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -776,16 +781,16 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "The Discord user ID to send the DM to"
+                                "description": "The Discord user ID to send the DM to",
                             },
                             "content": {
                                 "type": "string",
-                                "description": "The message content to send"
-                            }
+                                "description": "The message content to send",
+                            },
                         },
-                        "required": ["user_id", "content"]
-                    }
-                }
+                        "required": ["user_id", "content"],
+                    },
+                },
             },
             {
                 "type": "function",
@@ -797,23 +802,20 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID to check rate limit status for"
+                                "description": "Discord user ID to check rate limit status for",
                             }
                         },
-                        "required": ["user_id"]
-                    }
-                }
+                        "required": ["user_id"],
+                    },
+                },
             },
             {
                 "type": "function",
                 "function": {
                     "name": "get_system_rate_limit_stats",
                     "description": "Get overall system rate limiting statistics and metrics",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
-                }
+                    "parameters": {"type": "object", "properties": {}},
+                },
             },
             {
                 "type": "function",
@@ -825,25 +827,67 @@ class ToolManager:
                         "properties": {
                             "user_id": {
                                 "type": "string",
-                                "description": "Discord user ID to reset rate limits for"
+                                "description": "Discord user ID to reset rate limits for",
                             }
                         },
-                        "required": ["user_id"]
-                    }
-                }
-            }
+                        "required": ["user_id"],
+                    },
+                },
+            },
         ]
 
-    def remember_user_info(self, user_id: str, information_type: str, information: str) -> str:
+    def remember_user_info(
+        self, user_id: str, information_type: str, information: str
+    ) -> str:
         """Remember important information about a user with rate limiting"""
         if not self._check_rate_limit("remember_user_info", user_id):
-            return "Rate limit exceeded. Please wait before remembering more information."
+            return (
+                "Rate limit exceeded. Please wait before remembering more information."
+            )
 
         try:
-            # Import db here to avoid circular imports
+            # Check if unified memory backend is enabled (migration complete)
+            migration_flag = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.memory_migration_complete')
+            if os.path.exists(migration_flag):
+                try:
+                    # Dynamic import to avoid circular dependencies
+                    import importlib
+                    memory_module = importlib.import_module('memory')
+                    memory_backend = memory_module.memory_backend
+
+                    if memory_backend is not None:
+                        # Use unified memory backend
+                        import asyncio
+
+                        async def _store_memory():
+                            success = await memory_backend.store(
+                                user_id, information_type, information
+                            )
+                            return success
+
+                        # Run the async operation
+                        try:
+                            loop = asyncio.get_running_loop()
+                            import concurrent.futures
+
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(asyncio.run, _store_memory())
+                                success = future.result()
+                        except RuntimeError:
+                            success = asyncio.run(_store_memory())
+
+                        if success:
+                            return f"Got it! I'll remember that {information_type}: {information}"
+                        else:
+                            return "Sorry, I couldn't remember that information right now."
+                except (ImportError, AttributeError) as e:
+                    # Log but don't fail - fall back to legacy system
+                    import logging
+                    logging.getLogger(__name__).warning(f"Unified memory backend unavailable: {e}")
+
+            # Fallback to direct database access (legacy system)
             from data.database import db
 
-            # Store the information as a memory
             key = f"{information_type}"
             db.add_memory(user_id, key, information)
 
@@ -851,29 +895,38 @@ class ToolManager:
         except Exception as e:
             return f"Error remembering information: {str(e)}"
 
-    def remember_user_mcp(self, user_id: str, information_type: str, information: str) -> str:
+        except Exception as e:
+            return f"Error remembering information: {str(e)}"
+
+    def remember_user_mcp(
+        self, user_id: str, information_type: str, information: str
+    ) -> str:
         """Remember user information using MCP memory server with rate limiting and fallback"""
         if not self._check_rate_limit("remember_user_mcp", user_id):
-            return "Rate limit exceeded. Please wait before remembering more information."
+            return (
+                "Rate limit exceeded. Please wait before remembering more information."
+            )
 
         if not MCP_MEMORY_ENABLED:
             # Fallback to SQLite when MCP is disabled
             return self.remember_user_info(user_id, information_type, information)
 
         try:
-
             # Create the async function to run the operation
             async def _run_with_context():
                 async with MCPMemoryClient() as client:
                     if not await client.check_connection():
                         return {"error": "MCP memory server not accessible"}
-                    return await client.remember_user_info(user_id, information_type, information)
+                    return await client.remember_user_info(
+                        user_id, information_type, information
+                    )
 
             # Check if there's already a running event loop
             try:
                 loop = asyncio.get_running_loop()
                 # If there's a running loop, create a task and wait for it
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(asyncio.run, _run_with_context())
                     result = future.result()
@@ -883,25 +936,76 @@ class ToolManager:
 
             if "error" in result:
                 # Fallback to SQLite when MCP fails
-                fallback_result = self.remember_user_info(user_id, information_type, information)
+                fallback_result = self.remember_user_info(
+                    user_id, information_type, information
+                )
                 return f"MCP memory unavailable, using local storage: {fallback_result}"
 
             return f"Got it! I'll remember that {information_type}: {information} (stored in MCP memory)"
         except Exception as e:
             # Fallback to SQLite when MCP fails
             try:
-                fallback_result = self.remember_user_info(user_id, information_type, information)
+                fallback_result = self.remember_user_info(
+                    user_id, information_type, information
+                )
                 return f"MCP memory error ({str(e)}), using local storage: {fallback_result}"
             except Exception as fallback_error:
                 return f"Both MCP and local storage failed: MCP: {str(e)}, Local: {str(fallback_error)}"
 
     def search_user_memory(self, user_id: str, query: str = "") -> str:
-        """Search user memories using MCP memory server with rate limiting and fallback"""
+        """Search user memories with rate limiting"""
         if not self._check_rate_limit("search_user_memory", user_id):
             return "Rate limit exceeded. Please wait before searching memories."
 
+        # Import asyncio here to avoid issues
+        import asyncio
+        import concurrent.futures
+
+        # Check if unified memory backend is enabled (migration complete)
+        migration_flag = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.memory_migration_complete')
+        if os.path.exists(migration_flag):
+            try:
+                # Dynamic import to avoid circular dependencies
+                import importlib
+                memory_module = importlib.import_module('memory')
+                memory_backend = memory_module.memory_backend
+
+                if memory_backend is not None:
+                    # Use unified memory backend
+                    async def _search_memory():
+                        results = await memory_backend.search(user_id, query or None, limit=5)
+                        return results
+
+                    # Run the async operation
+                    try:
+                        loop = asyncio.get_running_loop()
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(asyncio.run, _search_memory())
+                            results = future.result()
+                    except RuntimeError:
+                        results = asyncio.run(_search_memory())
+
+                    if not results:
+                        return f"No memories found for user {user_id}."
+
+                    # Format the results
+                    formatted_memories = []
+                    for entry in results:
+                        key = entry.key
+                        value = entry.value
+                        formatted_memories.append(f"• {key}: {value}")
+
+                    return f"Found memories for user {user_id} (unified):\n" + "\n".join(
+                        formatted_memories
+                    )
+            except (ImportError, AttributeError) as e:
+                # Log but don't fail - fall back to legacy system
+                import logging
+                logging.getLogger(__name__).warning(f"Unified memory backend unavailable for search: {e}")
+
+        # Fallback to legacy MCP system
         if not MCP_MEMORY_ENABLED:
-            return "MCP memory server is not enabled. Use remember_user_info for local storage."
+            return "Memory search not available. Use remember_user_info for local storage."
 
         try:
             # Import MCP memory client
@@ -912,13 +1016,14 @@ class ToolManager:
                 async with MCPMemoryClient() as client:
                     if not await client.check_connection():
                         return {"error": "MCP memory server not accessible"}
-                    return await client.search_user_memory(user_id, query if query else None)
+                    return await client.search_user_memory(
+                        user_id, query if query else None
+                    )
 
             # Check if there's already a running event loop
             try:
                 loop = asyncio.get_running_loop()
                 # If there's a running loop, create a task and wait for it
-                import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(asyncio.run, _run_search_with_context())
                     result = future.result()
@@ -941,11 +1046,15 @@ class ToolManager:
                 timestamp = memory.get("timestamp", "")
                 formatted_memories.append(f"• {info_type}: {info}")
 
-            return f"Found memories for user {user_id} (MCP):\n" + "\n".join(formatted_memories)
+            return f"Found memories for user {user_id} (MCP):\n" + "\n".join(
+                formatted_memories
+            )
         except Exception as e:
             return f"Error searching MCP memory: {str(e)}. Local search not available for this tool."
 
-    def get_crypto_price(self, symbol: str, currency: str = "USD", user_id: str = "system") -> str:
+    def get_crypto_price(
+        self, symbol: str, currency: str = "USD", user_id: str = "system"
+    ) -> str:
         """Get cryptocurrency price from CoinMarketCap API with rate limiting"""
         if not self._check_rate_limit("crypto_price", user_id):
             return "Rate limit exceeded. Please wait before checking another price."
@@ -964,13 +1073,10 @@ class ToolManager:
         try:
             # Use CoinMarketCap API
             url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-            parameters = {
-                'symbol': symbol.upper(),
-                'convert': currency.upper()
-            }
+            parameters = {"symbol": symbol.upper(), "convert": currency.upper()}
             headers = {
-                'Accepts': 'application/json',
-                'X-CMC_PRO_API_KEY': COINMARKETCAP_API_KEY,
+                "Accepts": "application/json",
+                "X-CMC_PRO_API_KEY": COINMARKETCAP_API_KEY,
             }
 
             response = requests.get(url, headers=headers, params=parameters, timeout=10)
@@ -978,15 +1084,17 @@ class ToolManager:
             data = response.json()
 
             # Parse the response
-            if data.get('status', {}).get('error_code', 0) == 0:
-                crypto_data = data['data'][symbol.upper()]
-                price = crypto_data['quote'][currency.upper()]['price']
-                volume_24h = crypto_data['quote'][currency.upper()]['volume_24h']
-                market_cap = crypto_data['quote'][currency.upper()]['market_cap']
+            if data.get("status", {}).get("error_code", 0) == 0:
+                crypto_data = data["data"][symbol.upper()]
+                price = crypto_data["quote"][currency.upper()]["price"]
+                volume_24h = crypto_data["quote"][currency.upper()]["volume_24h"]
+                market_cap = crypto_data["quote"][currency.upper()]["market_cap"]
 
                 return f"Current {symbol.upper()} price: ${price:.6f} {currency.upper()}\n24h Volume: ${volume_24h:,.2f}\nMarket Cap: ${market_cap:,.2f}"
             else:
-                error_message = data.get('status', {}).get('error_message', 'Unknown error')
+                error_message = data.get("status", {}).get(
+                    "error_message", "Unknown error"
+                )
                 return f"Error getting crypto price: {error_message}"
 
         except requests.exceptions.RequestException as e:
@@ -1006,10 +1114,10 @@ class ToolManager:
             info = stock.info
 
             # Try to get current price
-            if 'currentPrice' in info:
-                price = info['currentPrice']
-            elif 'regularMarketPrice' in info:
-                price = info['regularMarketPrice']
+            if "currentPrice" in info:
+                price = info["currentPrice"]
+            elif "regularMarketPrice" in info:
+                price = info["regularMarketPrice"]
             else:
                 return f"Could not get price for {symbol}"
 
@@ -1017,7 +1125,9 @@ class ToolManager:
         except Exception as e:
             return f"Error getting stock price for {symbol}: {str(e)}"
 
-    def tip_user(self, user_id: str, amount: str, currency: str = "USD", message: str = "") -> str:
+    def tip_user(
+        self, user_id: str, amount: str, currency: str = "USD", message: str = ""
+    ) -> str:
         """Tip a user through tip.cc with rate limiting and validation"""
         if not self._check_rate_limit("tip_user"):
             return "Rate limit exceeded. Please wait before tipping again."
@@ -1027,10 +1137,13 @@ class ToolManager:
             try:
                 import sys
                 from pathlib import Path
+
                 sys.path.insert(0, str(Path(__file__).parent.parent))
                 from utils.security_validator import validator
-                
-                is_valid, error = validator.validate_tip_command(f"<@{user_id}>", amount, currency, message)
+
+                is_valid, error = validator.validate_tip_command(
+                    f"<@{user_id}>", amount, currency, message
+                )
                 if not is_valid:
                     return f"Validation error: {error}"
             except ImportError:
@@ -1045,7 +1158,7 @@ class ToolManager:
             amount_safe = amount.strip()
             currency_safe = currency.upper().strip()
             message_safe = message.strip() if message else ""
-            
+
             tip_command = f"$tip {recipient} {amount_safe} {currency_safe}"
             if message_safe:
                 tip_command += f" {message_safe}"
@@ -1057,7 +1170,9 @@ class ToolManager:
     def check_balance(self, user_id: str) -> str:
         """Check balance through tip.cc with rate limiting"""
         if not self._check_rate_limit("check_balance"):
-            return "Rate limit exceeded. Please wait before checking your balance again."
+            return (
+                "Rate limit exceeded. Please wait before checking your balance again."
+            )
 
         try:
             # Format the balance command
@@ -1083,6 +1198,7 @@ class ToolManager:
         """Fallback method to parse HTML results from SearXNG when JSON is not available"""
         try:
             import re
+
             from bs4 import BeautifulSoup
 
             # Try each instance for HTML parsing
@@ -1096,7 +1212,7 @@ class ToolManager:
                         "q": query,
                         "categories": "general",
                         "engines": "google,bing,duckduckgo,brave",
-                        "language": "en-US"
+                        "language": "en-US",
                     }
 
                     response = requests.get(search_url, params=params, timeout=15)
@@ -1104,29 +1220,45 @@ class ToolManager:
                     # Check if we got a successful response
                     if response.status_code == 200:
                         # Parse HTML content
-                        soup = BeautifulSoup(response.content, 'html.parser')
+                        soup = BeautifulSoup(response.content, "html.parser")
 
                         # Extract results from search result divs
-                        result_divs = soup.find_all('div', class_='result')
+                        result_divs = soup.find_all("div", class_="result")
                         if not result_divs:
                             # Try alternative class names
-                            result_divs = soup.find_all('div', {'class': lambda x: x and 'result' in x})
+                            result_divs = soup.find_all(
+                                "div", {"class": lambda x: x and "result" in x}
+                            )
 
                         if result_divs:
                             results = []
                             for result_div in result_divs[:7]:  # Limit to top 7 results
                                 try:
                                     # Extract title
-                                    title_elem = result_div.find('h3') or result_div.find('h4') or result_div.find('a')
-                                    title = title_elem.get_text(strip=True) if title_elem else "No title"
+                                    title_elem = (
+                                        result_div.find("h3")
+                                        or result_div.find("h4")
+                                        or result_div.find("a")
+                                    )
+                                    title = (
+                                        title_elem.get_text(strip=True)
+                                        if title_elem
+                                        else "No title"
+                                    )
 
                                     # Extract URL
-                                    url_elem = result_div.find('a', href=True)
-                                    url = url_elem['href'] if url_elem else ""
+                                    url_elem = result_div.find("a", href=True)
+                                    url = url_elem["href"] if url_elem else ""
 
                                     # Extract content/description
-                                    content_elem = result_div.find('p') or result_div.find('span', class_='content')
-                                    content = content_elem.get_text(strip=True) if content_elem else ""
+                                    content_elem = result_div.find(
+                                        "p"
+                                    ) or result_div.find("span", class_="content")
+                                    content = (
+                                        content_elem.get_text(strip=True)
+                                        if content_elem
+                                        else ""
+                                    )
 
                                     # Limit content length
                                     if len(content) > 300:
@@ -1176,7 +1308,7 @@ class ToolManager:
             "https://search.federicociro.com",
             "https://search.hbubli.cc",
             "https://search.im-in.space",
-            "https://search.indst.eu"
+            "https://search.indst.eu",
         ]
 
         # Shuffle the instances for better distribution
@@ -1194,7 +1326,7 @@ class ToolManager:
                     "format": "json",
                     "categories": "general",
                     "engines": "google,bing,duckduckgo,brave",
-                    "language": "en-US"
+                    "language": "en-US",
                 }
 
                 response = requests.get(search_url, params=params, timeout=15)
@@ -1207,9 +1339,15 @@ class ToolManager:
                         # Parse and format results
                         if "results" in data and data["results"]:
                             results = []
-                            for result in data["results"][:7]:  # Limit to top 7 results for better context
+                            for result in data["results"][
+                                :7
+                            ]:  # Limit to top 7 results for better context
                                 title = result.get("title", "No title")
-                                content = result.get("content", "")[:300] + "..." if len(result.get("content", "")) > 300 else result.get("content", "")
+                                content = (
+                                    result.get("content", "")[:300] + "..."
+                                    if len(result.get("content", "")) > 300
+                                    else result.get("content", "")
+                                )
                                 url = result.get("url", "")
                                 results.append(f"• {title}: {content} ({url})")
 
@@ -1256,7 +1394,7 @@ class ToolManager:
             "https://search.federicociro.com",
             "https://search.hbubli.cc",
             "https://search.im-in.space",
-            "https://search.indst.eu"
+            "https://search.indst.eu",
         ]
 
         # Shuffle the instances for better distribution
@@ -1274,7 +1412,7 @@ class ToolManager:
                     "format": "json",
                     "categories": "general",
                     "engines": "google,bing,duckduckgo,brave",
-                    "language": "en-US"
+                    "language": "en-US",
                 }
 
                 response = requests.get(search_url, params=params, timeout=15)
@@ -1287,9 +1425,15 @@ class ToolManager:
                         # Parse and format results
                         if "results" in data and data["results"]:
                             results = []
-                            for result in data["results"][:7]:  # Limit to top 7 results for better context
+                            for result in data["results"][
+                                :7
+                            ]:  # Limit to top 7 results for better context
                                 title = result.get("title", "No title")
-                                content = result.get("content", "")[:300] + "..." if len(result.get("content", "")) > 300 else result.get("content", "")
+                                content = (
+                                    result.get("content", "")[:300] + "..."
+                                    if len(result.get("content", "")) > 300
+                                    else result.get("content", "")
+                                )
                                 url = result.get("url", "")
                                 results.append(f"• {title}: {content} ({url})")
 
@@ -1315,7 +1459,9 @@ class ToolManager:
                 continue
 
         # If all instances failed, try HTML parsing as fallback
-        return self._web_search_html_fallback(f"company {company_name}", public_instances)
+        return self._web_search_html_fallback(
+            f"company {company_name}", public_instances
+        )
 
     def crawling(self, url: str, max_characters: int = 3000) -> str:
         """Extracts content from specific URLs using direct web scraping"""
@@ -1333,7 +1479,8 @@ class ToolManager:
 
             # Use BeautifulSoup to parse HTML and extract text
             from bs4 import BeautifulSoup
-            soup = BeautifulSoup(response.content, 'html.parser')
+
+            soup = BeautifulSoup(response.content, "html.parser")
 
             # Remove script and style elements
             for script in soup(["script", "style"]):
@@ -1355,7 +1502,13 @@ class ToolManager:
         except Exception as e:
             return f"Unexpected error during URL crawling: {str(e)}"
 
-    def generate_image(self, prompt: str, model: str = "SDXL 1.0", width: int = 1024, height: int = 1024) -> str:
+    def generate_image(
+        self,
+        prompt: str,
+        model: str = "SDXL 1.0",
+        width: int = 1024,
+        height: int = 1024,
+    ) -> str:
         """Generate an image using Arta API with rate limiting"""
         if not self._check_rate_limit("generate_image"):
             return "Rate limit exceeded. Please wait before generating another image."
@@ -1366,10 +1519,7 @@ class ToolManager:
 
             # Generate the image
             image_url = image_generator.generate_image(
-                prompt=prompt,
-                model=model,
-                width=width,
-                height=height
+                prompt=prompt, model=model, width=width, height=height
             )
 
             return image_url
@@ -1410,7 +1560,7 @@ class ToolManager:
 
         try:
             # Safe evaluation - allow basic math operations and comparison operators
-            allowed_chars = set('0123456789+-*/().<>=! ')
+            allowed_chars = set("0123456789+-*/().<>=! ")
             if not all(c in allowed_chars for c in expression):
                 return "Error: Invalid characters in expression"
 
@@ -1427,23 +1577,24 @@ class ToolManager:
                 ast.Mod: operator.mod,
                 ast.Pow: operator.pow,
                 ast.USub: operator.neg,
-                ast.UAdd: operator.pos
+                ast.UAdd: operator.pos,
             }
 
             # Supported comparison operators
             comparison_operators = {
-                ast.Gt: operator.gt,      # >
-                ast.Lt: operator.lt,      # <
-                ast.GtE: operator.ge,     # >=
-                ast.LtE: operator.le,     # <=
-                ast.Eq: operator.eq,      # ==
-                ast.NotEq: operator.ne,   # !=
+                ast.Gt: operator.gt,  # >
+                ast.Lt: operator.lt,  # <
+                ast.GtE: operator.ge,  # >=
+                ast.LtE: operator.le,  # <=
+                ast.Eq: operator.eq,  # ==
+                ast.NotEq: operator.ne,  # !=
             }
 
             def eval_expr(expr):
                 """
                 Safe evaluation of mathematical expressions
                 """
+
                 def _eval(node):
                     if isinstance(node, ast.Constant):  # For Python 3.8+
                         return node.value
@@ -1472,7 +1623,7 @@ class ToolManager:
                         raise TypeError(node)
 
                 try:
-                    tree = ast.parse(expr, mode='eval')
+                    tree = ast.parse(expr, mode="eval")
                     return _eval(tree.body)
                 except:
                     raise ValueError("Invalid expression")
@@ -1505,7 +1656,7 @@ class ToolManager:
                 "cet": "CET",
                 "cest": "CET",
                 "aest": "Australia/Sydney",
-                "utc": "UTC"
+                "utc": "UTC",
             }
 
             # Convert alias to proper timezone name
@@ -1523,7 +1674,9 @@ class ToolManager:
             now = datetime.now(tz)
 
             # Format the time and date
-            time_str = now.strftime("%I:%M:%S %p").lstrip("0")  # Remove leading zero from hour
+            time_str = now.strftime("%I:%M:%S %p").lstrip(
+                "0"
+            )  # Remove leading zero from hour
             date_str = now.strftime("%A, %B %d, %Y")
             iso_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
 
@@ -1554,7 +1707,16 @@ class ToolManager:
         except Exception as e:
             return f"Error getting time: {str(e)}"
 
-    def set_reminder(self, user_id: str, reminder_type: str, title: str, description: str, trigger_time: str, channel_id: str = None, recurring_pattern: str = None) -> str:
+    def set_reminder(
+        self,
+        user_id: str,
+        reminder_type: str,
+        title: str,
+        description: str,
+        trigger_time: str,
+        channel_id: str = None,
+        recurring_pattern: str = None,
+    ) -> str:
         """Set a new reminder with rate limiting"""
         if not self._check_rate_limit("set_reminder"):
             return "Rate limit exceeded. Please wait before setting another reminder."
@@ -1566,12 +1728,21 @@ class ToolManager:
             # Validate trigger_time format (ISO 8601)
             try:
                 import datetime
-                datetime.datetime.fromisoformat(trigger_time.replace('Z', '+00:00'))
+
+                datetime.datetime.fromisoformat(trigger_time.replace("Z", "+00:00"))
             except ValueError:
                 return "Invalid trigger_time format. Please use ISO 8601 format (e.g., '2025-10-03T15:00:00Z')"
 
             # Create the reminder
-            reminder_id = db.add_reminder(user_id, reminder_type, title, description, trigger_time, channel_id, recurring_pattern)
+            reminder_id = db.add_reminder(
+                user_id,
+                reminder_type,
+                title,
+                description,
+                trigger_time,
+                channel_id,
+                recurring_pattern,
+            )
 
             return f"✅ Reminder set successfully!\n• **Title**: {title}\n• **Description**: {description}\n• **Trigger Time**: {trigger_time}\n• **ID**: {reminder_id}"
 
@@ -1595,7 +1766,7 @@ class ToolManager:
             response = f"📅 **Your Reminders** ({len(reminders)} total):\n\n"
 
             for reminder in reminders:
-                status_emoji = "⏰" if reminder['status'] == 'pending' else "✅"
+                status_emoji = "⏰" if reminder["status"] == "pending" else "✅"
                 response += f"{status_emoji} **{reminder['title']}**\n"
                 response += f"   • Description: {reminder['description']}\n"
                 response += f"   • Due: {reminder['trigger_time']}\n"
@@ -1621,11 +1792,11 @@ class ToolManager:
             if not reminder:
                 return f"❌ Reminder with ID {reminder_id} not found."
 
-            if str(reminder['user_id']) != user_id:
+            if str(reminder["user_id"]) != user_id:
                 return "❌ You can only cancel your own reminders."
 
             # Cancel the reminder
-            db.update_reminder_status(int(reminder_id), 'cancelled')
+            db.update_reminder_status(int(reminder_id), "cancelled")
 
             return f"✅ Reminder '{reminder['title']}' has been cancelled."
 
@@ -1635,7 +1806,9 @@ class ToolManager:
     def check_due_reminders(self) -> str:
         """Check for due reminders and return formatted list with rate limiting"""
         if not self._check_rate_limit("check_due_reminders"):
-            return "Rate limit exceeded. Please wait before checking due reminders again."
+            return (
+                "Rate limit exceeded. Please wait before checking due reminders again."
+            )
 
         try:
             # Import db here to avoid circular imports
@@ -1723,7 +1896,9 @@ class ToolManager:
 
     async def discord_read_channel(self, channel_id: str, limit: int = 50) -> str:
         """Read messages from a specific Discord channel"""
-        logger.info(f"discord_read_channel called with channel_id={channel_id}, limit={limit}")
+        logger.info(
+            f"discord_read_channel called with channel_id={channel_id}, limit={limit}"
+        )
 
         if not self._check_rate_limit("discord_read_channel"):
             logger.warning("Rate limit exceeded for discord_read_channel")
@@ -1731,13 +1906,19 @@ class ToolManager:
 
         try:
             if self.discord_tools is None:
-                logger.error("Discord tools not initialized when discord_read_channel was called")
+                logger.error(
+                    "Discord tools not initialized when discord_read_channel was called"
+                )
                 return "Discord tools not initialized. Bot may not be connected to Discord."
 
-            logger.info(f"Calling discord_tools.read_channel with channel_id={channel_id}, limit={limit}")
+            logger.info(
+                f"Calling discord_tools.read_channel with channel_id={channel_id}, limit={limit}"
+            )
             result = await self.discord_tools.read_channel(channel_id, limit)
             logger.info(f"discord_tools.read_channel returned: {result}")
-            logger.info(f"Result type: {type(result)}, Keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+            logger.info(
+                f"Result type: {type(result)}, Keys: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}"
+            )
 
             if "error" in result:
                 logger.error(f"Error in discord_read_channel result: {result['error']}")
@@ -1750,21 +1931,27 @@ class ToolManager:
             response += f"Messages ({result['count']} total):\n\n"
 
             for message in messages:
-                timestamp = message['timestamp'].split('T')[0]  # Just the date part
+                timestamp = message["timestamp"].split("T")[0]  # Just the date part
                 response += f"[{timestamp}] {message['author']['username']}: {message['content']}\n"
-                if message['attachments']:
+                if message["attachments"]:
                     response += f"  Attachments: {', '.join(message['attachments'])}\n"
                 response += "\n"
 
-            logger.info(f"Successfully formatted {len(messages)} messages from channel {channel_id}")
+            logger.info(
+                f"Successfully formatted {len(messages)} messages from channel {channel_id}"
+            )
             return response
         except Exception as e:
             logger.error(f"Exception in discord_read_channel: {str(e)}", exc_info=True)
             return f"Error reading Discord channel: {str(e)}"
 
-    async def discord_search_messages(self, channel_id: str, query: str = "",
-                                     author_id: Optional[str] = None,
-                                     limit: int = 100) -> str:
+    async def discord_search_messages(
+        self,
+        channel_id: str,
+        query: str = "",
+        author_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> str:
         """Search for messages in a Discord channel by content, author, etc."""
         if not self._check_rate_limit("discord_search_messages"):
             return "Rate limit exceeded for Discord message search request."
@@ -1773,7 +1960,9 @@ class ToolManager:
             if self.discord_tools is None:
                 return "Discord tools not initialized. Bot may not be connected to Discord."
 
-            result = await self.discord_tools.search_messages(channel_id, query, author_id, limit)
+            result = await self.discord_tools.search_messages(
+                channel_id, query, author_id, limit
+            )
 
             if "error" in result:
                 return f"Error searching Discord messages: {result['error']}"
@@ -1786,9 +1975,9 @@ class ToolManager:
             response += f"Found {result['count']} matching messages:\n\n"
 
             for message in messages:
-                timestamp = message['timestamp'].split('T')[0]  # Just the date part
+                timestamp = message["timestamp"].split("T")[0]  # Just the date part
                 response += f"[{timestamp}] {message['author']['username']}: {message['content']}\n"
-                if message['attachments']:
+                if message["attachments"]:
                     response += f"  Attachments: {', '.join(message['attachments'])}\n"
                 response += "\n"
 
@@ -1796,8 +1985,9 @@ class ToolManager:
         except Exception as e:
             return f"Error searching Discord messages: {str(e)}"
 
-    def discord_list_guild_members(self, guild_id: str, limit: int = 100,
-                                  include_roles: bool = False) -> str:
+    def discord_list_guild_members(
+        self, guild_id: str, limit: int = 100, include_roles: bool = False
+    ) -> str:
         """List members of a specific Discord guild/server"""
         if not self._check_rate_limit("discord_list_guild_members"):
             return "Rate limit exceeded for Discord guild members list request."
@@ -1806,7 +1996,9 @@ class ToolManager:
             if self.discord_tools is None:
                 return "Discord tools not initialized. Bot may not be connected to Discord."
 
-            result = self.discord_tools.list_guild_members(guild_id, limit, include_roles)
+            result = self.discord_tools.list_guild_members(
+                guild_id, limit, include_roles
+            )
             if "error" in result:
                 return f"Error listing Discord guild members: {result['error']}"
 
@@ -1825,10 +2017,13 @@ class ToolManager:
         except Exception as e:
             return f"Error listing Discord guild members: {str(e)}"
 
-    async def discord_send_message(self, channel_id: str, content: str,
-                                  reply_to_message_id: Optional[str] = None) -> str:
+    async def discord_send_message(
+        self, channel_id: str, content: str, reply_to_message_id: Optional[str] = None
+    ) -> str:
         """Send a message to a specific Discord channel"""
-        logger.info(f"discord_send_message called with channel_id={channel_id}, content='{content[:100]}...', reply_to_message_id={reply_to_message_id}")
+        logger.info(
+            f"discord_send_message called with channel_id={channel_id}, content='{content[:100]}...', reply_to_message_id={reply_to_message_id}"
+        )
 
         if not self._check_rate_limit("discord_send_message"):
             logger.warning("Rate limit exceeded for Discord send message request.")
@@ -1836,11 +2031,17 @@ class ToolManager:
 
         try:
             if self.discord_tools is None:
-                logger.error("Discord tools not initialized when discord_send_message was called")
+                logger.error(
+                    "Discord tools not initialized when discord_send_message was called"
+                )
                 return "Discord tools not initialized. Bot may not be connected to Discord."
 
-            logger.info(f"Calling discord_tools.send_message with channel_id={channel_id}, content='{content[:100]}...', reply_to_message_id={reply_to_message_id}")
-            result = await self.discord_tools.send_message(channel_id, content, reply_to_message_id)
+            logger.info(
+                f"Calling discord_tools.send_message with channel_id={channel_id}, content='{content[:100]}...', reply_to_message_id={reply_to_message_id}"
+            )
+            result = await self.discord_tools.send_message(
+                channel_id, content, reply_to_message_id
+            )
             logger.info(f"discord_tools.send_message returned: {result}")
 
             if "error" in result:
@@ -1848,7 +2049,9 @@ class ToolManager:
                 return f"Error sending Discord message: {result['error']}"
 
             message = result["message"]
-            logger.info(f"Successfully sent message to channel {message['channel_id']}, message ID: {message['id']}")
+            logger.info(
+                f"Successfully sent message to channel {message['channel_id']}, message ID: {message['id']}"
+            )
             return f"✅ Message sent successfully!\nChannel: {message['channel_id']}\nMessage ID: {message['id']}\nContent: {message['content']}"
         except Exception as e:
             logger.error(f"Exception in discord_send_message: {str(e)}", exc_info=True)
@@ -1892,7 +2095,9 @@ class ToolManager:
             if not roles:
                 return f"User {user['display_name']} has no roles in guild '{guild['name']}' (ID: {guild['id']})."
 
-            role_list = "\n".join([f"- {role['name']} (ID: {role['id']})" for role in roles])
+            role_list = "\n".join(
+                [f"- {role['name']} (ID: {role['id']})" for role in roles]
+            )
             return f"Discord User Roles in '{guild['name']}':\nUser: {user['display_name']} (ID: {user['id']})\nRoles ({result['role_count']}):\n{role_list}"
         except Exception as e:
             return f"Error getting Discord user roles: {str(e)}"
@@ -1900,33 +2105,40 @@ class ToolManager:
     def set_discord_tools(self, bot_client):
         """Initialize Discord tools with the bot client"""
         from .discord_tools import DiscordTools
+
         self.discord_tools = DiscordTools(bot_client)
 
     def get_user_rate_limit_status(self, user_id: str) -> str:
         """Get rate limiting status for a specific user"""
         if not RATE_LIMITING_ENABLED:
             return "Rate limiting is not enabled."
-        
+
         try:
             stats = rate_limit_middleware.rate_limiter.get_user_stats(user_id)
-            
+
             response = f"📊 **Rate Limit Status for User {user_id}**\n\n"
             response += f"🔥 Penalty Multiplier: {stats['penalty_multiplier']}x\n"
             response += f"⚠️ Total Violations: {stats['total_violations']}\n"
             response += f"🚨 Recent Violations (1h): {stats['recent_violations']}\n\n"
-            
-            if stats['current_usage']:
+
+            if stats["current_usage"]:
                 response += "**Current Usage:**\n"
-                for operation, usage in stats['current_usage'].items():
+                for operation, usage in stats["current_usage"].items():
                     response += f"• {operation}:\n"
                     for limit_type, data in usage.items():
-                        percentage = data['percentage']
-                        emoji = "🟢" if percentage < 50 else "🟡" if percentage < 80 else "🔴"
+                        percentage = data["percentage"]
+                        emoji = (
+                            "🟢"
+                            if percentage < 50
+                            else "🟡"
+                            if percentage < 80
+                            else "🔴"
+                        )
                         response += f"  {emoji} {limit_type}: {data['current']}/{data['limit']} ({percentage:.1f}%)\n"
                     response += "\n"
             else:
                 response += "No recent activity recorded.\n"
-            
+
             return response
         except Exception as e:
             return f"Error getting rate limit status: {str(e)}"
@@ -1935,10 +2147,10 @@ class ToolManager:
         """Get overall system rate limiting statistics"""
         if not RATE_LIMITING_ENABLED:
             return "Rate limiting is not enabled."
-        
+
         try:
             stats = rate_limit_middleware.rate_limiter.get_system_stats()
-            
+
             response = f"📈 **System Rate Limit Statistics**\n\n"
             response += f"⏱️ Uptime: {stats['uptime_seconds']:.0f} seconds\n"
             response += f"📊 Total Requests: {stats['total_requests']}\n"
@@ -1946,15 +2158,21 @@ class ToolManager:
             response += f"🚀 Requests/Second: {stats['requests_per_second']:.2f}\n"
             response += f"👥 Active Users (1h): {stats['active_users_count']}\n"
             response += f"👤 Total Users: {stats['total_users_count']}\n"
-            response += f"🚨 Recent Violations (1h): {stats['recent_violations_count']}\n"
+            response += (
+                f"🚨 Recent Violations (1h): {stats['recent_violations_count']}\n"
+            )
             response += f"🔥 Users with Penalties: {stats['users_with_penalties']}\n"
-            response += f"⚡ Average Penalty: {stats['average_penalty_multiplier']:.2f}x\n"
-            
+            response += (
+                f"⚡ Average Penalty: {stats['average_penalty_multiplier']:.2f}x\n"
+            )
+
             # Calculate violation rate
-            if stats['total_requests'] > 0:
-                violation_rate = (stats['total_violations'] / stats['total_requests']) * 100
+            if stats["total_requests"] > 0:
+                violation_rate = (
+                    stats["total_violations"] / stats["total_requests"]
+                ) * 100
                 response += f"📉 Violation Rate: {violation_rate:.2f}%\n"
-            
+
             return response
         except Exception as e:
             return f"Error getting system stats: {str(e)}"
@@ -1963,14 +2181,16 @@ class ToolManager:
         """Reset rate limits for a specific user (admin function)"""
         if not RATE_LIMITING_ENABLED:
             return "Rate limiting is not enabled."
-        
+
         try:
             rate_limit_middleware.rate_limiter.reset_user_limits(user_id)
             return f"✅ Rate limits reset for user {user_id}"
         except Exception as e:
             return f"Error resetting user rate limits: {str(e)}"
 
-    async def execute_tool(self, tool_name: str, arguments: Dict, user_id: str = "system") -> str:
+    async def execute_tool(
+        self, tool_name: str, arguments: Dict, user_id: str = "system"
+    ) -> str:
         """Execute a tool by name with given arguments and improved error handling"""
         if tool_name not in self.tools:
             return f"Unknown tool: {tool_name}"
@@ -1984,7 +2204,11 @@ class ToolManager:
                 mapped_arguments["information"] = mapped_arguments.pop("value")
         elif tool_name == "get_bonus_schedule":
             # Handle case where AI calls with "platform" instead of separate "site" and "frequency"
-            if "platform" in mapped_arguments and "site" not in mapped_arguments and "frequency" not in mapped_arguments:
+            if (
+                "platform" in mapped_arguments
+                and "site" not in mapped_arguments
+                and "frequency" not in mapped_arguments
+            ):
                 platform = mapped_arguments.pop("platform")
                 # Parse platform string to extract site and frequency
                 # Example: "shuffle weekly" -> site="shuffle", frequency="weekly"
@@ -1998,13 +2222,17 @@ class ToolManager:
                     mapped_arguments["frequency"] = "weekly"
 
         # Add user_id to arguments for methods that support it
-        if tool_name in ["get_crypto_price", "get_stock_price"] and "user_id" not in mapped_arguments:
+        if (
+            tool_name in ["get_crypto_price", "get_stock_price"]
+            and "user_id" not in mapped_arguments
+        ):
             mapped_arguments["user_id"] = user_id
 
         try:
             tool_func = self.tools[tool_name]
             # Check if the function is a coroutine function
             import asyncio
+
             if asyncio.iscoroutinefunction(tool_func):
                 return await tool_func(**mapped_arguments)
             else:
@@ -2014,22 +2242,30 @@ class ToolManager:
         except Exception as e:
             return f"Error executing {tool_name}: {str(e)}"
 
+
 # Async helper functions for MCP operations
 import asyncio
 
-async def _run_mcp_with_context(user_id: str, information_type: str, information: str) -> Dict[str, Any]:
+
+async def _run_mcp_with_context(
+    user_id: str, information_type: str, information: str
+) -> Dict[str, Any]:
     """Run MCP memory operation with proper context management"""
     from tools.mcp_memory_client import MCPMemoryClient
 
     async with MCPMemoryClient() as client:
         return await client.remember_user_info(user_id, information_type, information)
 
-async def _run_mcp_search_with_context(user_id: str, query: Optional[str] = None) -> Dict[str, Any]:
+
+async def _run_mcp_search_with_context(
+    user_id: str, query: Optional[str] = None
+) -> Dict[str, Any]:
     """Run MCP memory search with proper context management"""
     from tools.mcp_memory_client import MCPMemoryClient
 
     async with MCPMemoryClient() as client:
         return await client.search_user_memory(user_id, query)
+
 
 # Global tool manager instance
 tool_manager = ToolManager()

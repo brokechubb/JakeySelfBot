@@ -250,7 +250,7 @@ Generate a random Indian name and address.
 
 ### %bal / %bals
 
-Check tip.cc balances and click button on response.
+Check tip.cc balances and click button on response. (Admin only)
 
 **Usage**: `%bal` or `%bals`
 
@@ -258,7 +258,7 @@ Check tip.cc balances and click button on response.
 
 ### %transactions [limit]
 
-Show recent tip.cc transaction history.
+Show recent tip.cc transaction history. (Admin only)
 
 **Usage**: `%transactions [limit]`
 
@@ -271,7 +271,7 @@ Show recent tip.cc transaction history.
 
 ### %tipstats
 
-Show tip.cc statistics and earnings.
+Show tip.cc statistics and earnings. (Admin only)
 
 **Usage**: `%tipstats`
 

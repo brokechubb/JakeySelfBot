@@ -5,14 +5,17 @@ This file provides guidance to agentic coding agents working with code in this r
 ## Common Development Commands
 
 ### Running the Bot
+
 - **Standard startup**: `./scripts/jakey.sh` - Starts bot with MCP memory server, monitoring, and proper error handling
 - **Direct Python**: `python main.py` - Simple startup without additional services
 - **Skip MCP server**: `./scripts/jakey.sh --skip-mcp` - Start without memory server
 
 ### MCP Memory Server
+
 - **Start MCP server**: `./scripts/start_mcp_server.sh` - Start memory server independently
 
 ### Service Management
+
 - **Systemd setup**: `./scripts/setup_systemd.sh` - Install as systemd service
 - **Service control**: `./scripts/service_control.sh` - Start/stop systemd service
 - **Status check**: `./scripts/check_status.sh` - Check bot and service status
@@ -23,6 +26,7 @@ This file provides guidance to agentic coding agents working with code in this r
 ### Core Components
 
 **Entry Point & Initialization (`main.py`)**
+
 - Dependency injection container with all services
 - Graceful shutdown handling with signal handlers
 - File locking to prevent multiple instances
@@ -30,6 +34,7 @@ This file provides guidance to agentic coding agents working with code in this r
 - Automatic reconnection with exponential backoff
 
 **Bot Client (`bot/client.py`)**
+
 - Main Discord bot implementation with discord.py-self
 - 35 registered commands across 8 categories
 - Advanced message processing with tool integration
@@ -38,6 +43,7 @@ This file provides guidance to agentic coding agents working with code in this r
 - Rate limiting and user permissions
 
 **Configuration (`config.py`)**
+
 - Environment-based configuration with dotenv
 - 70+ configurable parameters
 - Features: AI models, rate limits, timeouts, admin controls
@@ -47,12 +53,14 @@ This file provides guidance to agentic coding agents working with code in this r
 ### AI Integration
 
 **AI Provider Management (`ai/ai_provider_manager.py`)**
+
 - Primary: Pollinations API with fallback to OpenRouter
 - Automatic failover and restoration logic
 - Rate limiting and timeout monitoring
 - Response uniqueness enforcement
 
 **Image Generation (`ai/arta.py`)**
+
 - 49 professional artistic styles (Fantasy Art, Van Gogh, etc.)
 - 9 aspect ratios for flexible dimensions
 - Asynchronous generation with status polling
@@ -61,12 +69,14 @@ This file provides guidance to agentic coding agents working with code in this r
 ### Tool System
 
 **Tool Manager (`tools/tool_manager.py`)**
+
 - 12 specialized tools for various operations
 - Function calling integration with AI providers
 - Discord-specific tools for server management
 - Memory tools for user preference storage
 
 **Key Tools:**
+
 - `web_search` - Self-hosted SearXNG integration
 - `crypto_price` - CoinMarketCap API integration
 - `discord_*` tools - Server and channel management
@@ -75,12 +85,14 @@ This file provides guidance to agentic coding agents working with code in this r
 ### Database & Storage
 
 **SQLite Database (`data/` directory)**
+
 - Async operations with aiosqlite
 - Conversation history and user preferences
 - Tip.cc transaction tracking
 - Airdrop claiming records
 
 **MCP Memory Server (`tools/mcp_memory_server.py`)**
+
 - Optional external memory service
 - Dynamic port assignment
 - HTTP API with health endpoints
@@ -114,6 +126,7 @@ pip install -U discord.py-self  # NOT discord.py!
 ```
 
 ### External APIs
+
 - **Pollinations API**: Primary AI text/image generation
 - **OpenRouter**: Fallback AI provider when Pollinations fails
 - **Arta API**: Professional artistic image generation (49 styles)
@@ -122,6 +135,7 @@ pip install -U discord.py-self  # NOT discord.py!
 - **tip.cc**: Discord cryptocurrency tipping bot integration
 
 ### Core Python Packages
+
 - `discord.py-self`: Discord self-bot framework
 - `aiohttp`: Async HTTP client for API calls
 - `aiosqlite`: Async SQLite database operations
@@ -131,30 +145,36 @@ pip install -U discord.py-self  # NOT discord.py!
 ## Development Guidelines
 
 ### Command System
+
 - Commands use `%` prefix (e.g., `%help`, `%image`, `%bal`)
+- Tip.cc commands (`%bal`, `%transactions`, `%tipstats`) are admin-only
 - Admin commands require user ID in `ADMIN_USER_IDS` env var
 - All commands support comprehensive help with examples
 - Rate limiting enforced per user (configurable)
 
 ### Error Handling
+
 - Sanitized error messages for user-facing responses
 - Full error details logged for debugging
 - Graceful degradation when external services fail
 - Automatic reconnection for Discord connectivity issues
 
 ### Testing Strategy
+
 - 44 comprehensive unit tests covering all major features
 - Test modules follow `test_*.py` naming convention
 - Tests verify commands, database operations, API integration
 - Mock external dependencies for reliable testing
 
 ### Configuration Management
+
 - All secrets in `.env` file (never in code)
 - Feature flags for enabling/disabling components
 - Comprehensive default values for all settings
 - Environment-specific overrides supported
 
 ### Security Considerations
+
 - Input sanitization for all user inputs
 - SQL injection protection with parameterized queries
 - Rate limiting to prevent abuse
@@ -164,27 +184,32 @@ pip install -U discord.py-self  # NOT discord.py!
 ## Code Style Guidelines
 
 ### Imports
+
 - Standard library imports first, then third-party, then local imports
 - Group imports logically with blank lines between groups
 - Use explicit imports (`from module import Class`) rather than wildcards
 
 ### Formatting
+
 - Line length: 88 characters (default Black formatting)
 - Indentation: 4 spaces
 - Use double quotes for strings unless single quotes are needed for escaping
 
 ### Types and Naming
+
 - Use type hints for function parameters and return values
 - Variable names: snake_case
 - Class names: PascalCase
 - Constants: UPPER_SNAKE_CASE
 
 ### Error Handling
+
 - Prefer specific exception handling over broad except clauses
 - Always log errors with context
 - Use f-strings for error messages
 
 ### Testing
+
 - Use unittest framework
 - Test files named test\_\*.py
 - Test classes inherit from unittest.TestCase
@@ -192,6 +217,7 @@ pip install -U discord.py-self  # NOT discord.py!
 - Mock external dependencies
 
 ### Additional Rules
+
 - No inline comments unless explaining complex logic
 - Keep functions focused and small
 - Use docstrings for all public functions and classes
@@ -362,3 +388,4 @@ The message relay feature now uses webhooks exclusively instead of direct channe
 - Discord UI components (modals, select menus, etc.)
 - Bot-only intents and privileges
   **REMEMBER**: Self-bots have different capabilities than official bots
+```

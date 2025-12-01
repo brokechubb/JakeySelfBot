@@ -1,22 +1,24 @@
-import discord
-from discord.ext import commands
-from media.image_generator import image_generator
-from ai.pollinations import pollinations_api
-import sqlite3
-from data.database import db
+import asyncio
+import logging
 import math
 import re
-import asyncio
-from typing import Optional
-from config import ADMIN_USER_IDS
-import logging
-from utils import random_indian_generator
+import sqlite3
 from datetime import datetime, timezone
+from typing import Optional
+
+import discord
 import pytz
+from discord.ext import commands
+
+from ai.pollinations import pollinations_api
+from config import ADMIN_USER_IDS
+from data.database import db
+from media.image_generator import image_generator
+from utils import random_indian_generator
+from utils.helpers import send_long_message
 
 # Configure logging
 from utils.logging_config import get_logger
-from utils.helpers import send_long_message
 
 logger = get_logger(__name__)
 
@@ -25,30 +27,44 @@ def sanitize_error_message(error_message: str) -> str:
     """Remove sensitive information from error messages."""
     if not error_message:
         return "An error occurred"
-    
+
     import re
-    sanitized = re.sub(r'[/\\][a-zA-Z0-9_\-/\\\.]+', '[PATH]', error_message)
-    sanitized = re.sub(r'(sqlite:///[^\s]+|mysql://[^\s]+|postgresql://[^\s]+)', '[DATABASE]', sanitized)
-    sanitized = re.sub(r'\b[A-Za-z0-9]{20,}\b', '[KEY]', sanitized)
-    sanitized = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL]', sanitized)
-    sanitized = re.sub(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', '[IP]', sanitized)
-    sanitized = re.sub(r'https?://[^\s]+', '[URL]', sanitized)
-    sanitized = re.sub(r'Traceback \(most recent call last\):.*?$', '', sanitized, flags=re.MULTILINE | re.DOTALL)
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
-    
+
+    sanitized = re.sub(r"[/\\][a-zA-Z0-9_\-/\\\.]+", "[PATH]", error_message)
+    sanitized = re.sub(
+        r"(sqlite:///[^\s]+|mysql://[^\s]+|postgresql://[^\s]+)",
+        "[DATABASE]",
+        sanitized,
+    )
+    sanitized = re.sub(r"\b[A-Za-z0-9]{20,}\b", "[KEY]", sanitized)
+    sanitized = re.sub(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL]", sanitized
+    )
+    sanitized = re.sub(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", "[IP]", sanitized)
+    sanitized = re.sub(r"https?://[^\s]+", "[URL]", sanitized)
+    sanitized = re.sub(
+        r"Traceback \(most recent call last\):.*?$",
+        "",
+        sanitized,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
+
     if len(sanitized) > 200:
         sanitized = sanitized[:197] + "..."
-    
+
     return sanitized or "Sanitized error message"
 
 
 def handle_command_error(error: Exception, ctx, command_name: str) -> str:
     """Handle command errors with sanitization."""
     sanitized_msg = sanitize_error_message(str(error))
-    
+
     # Log the full error for debugging
-    logger.error(f"Command {command_name} error for user {ctx.author.id}: {type(error).__name__}: {str(error)}")
-    
+    logger.error(
+        f"Command {command_name} error for user {ctx.author.id}: {type(error).__name__}: {str(error)}"
+    )
+
     # Return user-friendly message
     return f"💀 **Command failed:** {sanitized_msg}"
 
@@ -56,7 +72,7 @@ def handle_command_error(error: Exception, ctx, command_name: str) -> str:
 def is_admin(user_id):
     """
     Securely check if a user is an admin with exact matching and validation.
-    
+
     SECURITY FIXES:
     - Exact string matching instead of substring matching
     - Input validation and sanitization
@@ -68,20 +84,20 @@ def is_admin(user_id):
         if user_id is None:
             logger.warning(f"ADMIN_CHECK: None user_id provided")
             return False
-        
+
         # Convert to string and validate it's a proper Discord user ID (17-19 digit number)
         user_id_str = str(user_id).strip()
-        
+
         # Validate Discord user ID format (should be 17-19 digits)
         if not user_id_str.isdigit() or not (17 <= len(user_id_str) <= 19):
             logger.warning(f"ADMIN_CHECK: Invalid user ID format: {user_id_str}")
             return False
-        
+
         # Check if ADMIN_USER_IDS is configured
         if not ADMIN_USER_IDS or not ADMIN_USER_IDS.strip():
             logger.warning("ADMIN_CHECK: No admin user IDs configured")
             return False
-        
+
         # Parse admin IDs with validation
         admin_ids = []
         for admin_id in ADMIN_USER_IDS.split(","):
@@ -90,25 +106,31 @@ def is_admin(user_id):
                 admin_ids.append(admin_id)
             elif admin_id:  # Non-empty but invalid
                 logger.warning(f"ADMIN_CHECK: Invalid admin ID in config: {admin_id}")
-        
+
         if not admin_ids:
             logger.warning("ADMIN_CHECK: No valid admin IDs found in configuration")
             return False
-        
+
         # EXACT MATCHING - This fixes the substring matching vulnerability
         is_admin_result = user_id_str in admin_ids
-        
+
         # Log admin access attempts (both successful and failed)
         if is_admin_result:
-            logger.info(f"ADMIN_CHECK: ✅ Admin access granted for user ID: {user_id_str}")
+            logger.info(
+                f"ADMIN_CHECK: ✅ Admin access granted for user ID: {user_id_str}"
+            )
         else:
-            logger.warning(f"ADMIN_CHECK: ❌ Admin access denied for user ID: {user_id_str}")
-        
+            logger.warning(
+                f"ADMIN_CHECK: ❌ Admin access denied for user ID: {user_id_str}"
+            )
+
         return is_admin_result
-        
+
     except Exception as e:
         # Log any unexpected errors during admin check
-        logger.error(f"ADMIN_CHECK: Error during admin verification for user_id {user_id}: {str(e)}")
+        logger.error(
+            f"ADMIN_CHECK: Error during admin verification for user_id {user_id}: {str(e)}"
+        )
         return False
 
 
@@ -121,31 +143,54 @@ def is_admin_with_role_check(ctx):
         # First check user ID (primary method)
         if not is_admin(ctx.author.id):
             return False
-        
+
         # If in a guild, also check for admin roles (additional security)
         if ctx.guild:
             # Get member object with roles
-            member = ctx.guild.get_member(ctx.author.id) or ctx.guild.fetch_member(ctx.author.id)
-            
+            member = ctx.guild.get_member(ctx.author.id) or ctx.guild.fetch_member(
+                ctx.author.id
+            )
+
             if member and member.roles:
                 # Check for common admin role names
                 admin_role_keywords = [
-                    'admin', 'administrator', 'moderator', 'mod', 
-                    'owner', 'staff', 'manager', 'op', 'operator'
+                    "admin",
+                    "administrator",
+                    "moderator",
+                    "mod",
+                    "owner",
+                    "staff",
+                    "manager",
+                    "op",
+                    "operator",
                 ]
-                
-                role_names = [role.name.lower() for role in member.roles if role.name != "@everyone"]
-                has_admin_role = any(keyword in role_name for keyword in admin_role_keywords for role_name in role_names)
-                
+
+                role_names = [
+                    role.name.lower()
+                    for role in member.roles
+                    if role.name != "@everyone"
+                ]
+                has_admin_role = any(
+                    keyword in role_name
+                    for keyword in admin_role_keywords
+                    for role_name in role_names
+                )
+
                 if has_admin_role:
-                    logger.info(f"ADMIN_ROLE_CHECK: ✅ User {ctx.author.id} has admin role in guild {ctx.guild.id}")
+                    logger.info(
+                        f"ADMIN_ROLE_CHECK: ✅ User {ctx.author.id} has admin role in guild {ctx.guild.id}"
+                    )
                 else:
-                    logger.info(f"ADMIN_ROLE_CHECK: ⚠️ User {ctx.author.id} is admin by ID but no admin role in guild {ctx.guild.id}")
-        
+                    logger.info(
+                        f"ADMIN_ROLE_CHECK: ⚠️ User {ctx.author.id} is admin by ID but no admin role in guild {ctx.guild.id}"
+                    )
+
         return True
-        
+
     except Exception as e:
-        logger.error(f"ADMIN_ROLE_CHECK: Error during role verification for user {ctx.author.id}: {str(e)}")
+        logger.error(
+            f"ADMIN_ROLE_CHECK: Error during role verification for user {ctx.author.id}: {str(e)}"
+        )
         # Fall back to basic admin check if role check fails
         return is_admin(ctx.author.id)
 
@@ -597,19 +642,29 @@ def setup_commands(bot_instance):
             # Try to get member object with roles (works in guild context)
             try:
                 if ctx.guild:
-                    member = ctx.guild.get_member(target_user.id) or await ctx.guild.fetch_member(target_user.id)
-                    target_display = member.name if hasattr(member, 'name') else target_user.name
+                    member = ctx.guild.get_member(
+                        target_user.id
+                    ) or await ctx.guild.fetch_member(target_user.id)
+                    target_display = (
+                        member.name if hasattr(member, "name") else target_user.name
+                    )
                     response = f"💀 User Info for **{target_display}**:\n"
                     response += f"ID: {target_user.id}\n"
                     response += f"Display Name: {member.display_name if hasattr(member, 'display_name') else target_user.name}\n"
                     response += f"Bot: {'Yes' if target_user.bot else 'No'}\n"
 
                     # Add roles information
-                    if hasattr(member, 'roles') and member.roles:
+                    if hasattr(member, "roles") and member.roles:
                         # Skip @everyone role (first role by default)
-                        role_names = [role.name for role in member.roles[1:]] if len(member.roles) > 1 else []
+                        role_names = (
+                            [role.name for role in member.roles[1:]]
+                            if len(member.roles) > 1
+                            else []
+                        )
                         if role_names:
-                            response += f"Roles ({len(role_names)}): {', '.join(role_names)}\n"
+                            response += (
+                                f"Roles ({len(role_names)}): {', '.join(role_names)}\n"
+                            )
                         else:
                             response += "Roles: None (excluding @everyone)\n"
                     else:
@@ -626,7 +681,9 @@ def setup_commands(bot_instance):
                 response = f"💀 User Info for **{target_user.name}**:\n"
                 response += f"ID: {target_user.id}\n"
                 response += f"Bot: {'Yes' if target_user.bot else 'No'}\n"
-                response += "Roles: Could not retrieve (user might not be in this server)\n"
+                response += (
+                    "Roles: Could not retrieve (user might not be in this server)\n"
+                )
 
             await ctx.send(response)
         except Exception as e:
@@ -779,7 +836,9 @@ def setup_commands(bot_instance):
             await ctx.send(handle_command_error(e, ctx, "tip"))
 
     @bot_instance.command(name="airdrop")
-    async def send_airdrop(ctx, amount: str, currency: str, *, duration_and_maybe_for: str):
+    async def send_airdrop(
+        ctx, amount: str, currency: str, *, duration_and_maybe_for: str
+    ):
         """Create an airdrop using tip.cc (admin only)"""
         # Check if user is admin
         if not is_admin(ctx.author.id):
@@ -793,7 +852,7 @@ def setup_commands(bot_instance):
             duration = duration_and_maybe_for
             if duration.lower().startswith("for "):
                 duration = duration[4:]  # Remove "for " prefix
-            
+
             # Send the airdrop
             success = await bot_instance.tipcc_manager.send_airdrop_command(
                 ctx.channel, amount, currency, duration
@@ -813,7 +872,14 @@ def setup_commands(bot_instance):
 
     @bot_instance.command(name="transactions")
     async def show_transactions(ctx, limit: int = 10):
-        """Show recent tip.cc transaction history"""
+        """Show recent tip.cc transaction history (admin only)"""
+        # Check if user is admin
+        if not is_admin(ctx.author.id):
+            await ctx.send(
+                "💀 **Admin only command bro!** You can't view Jakey's transactions!"
+            )
+            return
+
         try:
             transaction_history = (
                 await bot_instance.tipcc_manager.get_transaction_history(limit)
@@ -824,7 +890,14 @@ def setup_commands(bot_instance):
 
     @bot_instance.command(name="tipstats")
     async def tip_stats(ctx):
-        """Show tip.cc statistics and earnings"""
+        """Show tip.cc statistics and earnings (admin only)"""
+        # Check if user is admin
+        if not is_admin(ctx.author.id):
+            await ctx.send(
+                "💀 **Admin only command bro!** You can't view Jakey's stats!"
+            )
+            return
+
         try:
             stats = await bot_instance.db.aget_transaction_stats()
 
@@ -909,131 +982,173 @@ def setup_commands(bot_instance):
 
     @bot_instance.command(name="bal")
     async def check_balance(ctx):
-        """Check tip.cc balances and click button on response"""
+        """Check tip.cc balances and click button on response (admin only)"""
+        # Check if user is admin
+        if not is_admin(ctx.author.id):
+            await ctx.send(
+                "💀 **Admin only command bro!** You can't view Jakey's balances!"
+            )
+            return
+
         await ctx.send("$bals top")
         await asyncio.sleep(10)
 
         # Find the last message from user 617037497574359050 (tip.cc bot)
         async for message in ctx.channel.history(limit=50):
             if message.author.id == 617037497574359050 and message.components:
-                logger.info(f"Found tip.cc message with {len(message.components)} component(s)")
-                
+                logger.info(
+                    f"Found tip.cc message with {len(message.components)} component(s)"
+                )
+
                 # Collect all buttons from all components
                 all_buttons = []
                 for component in message.components:
-                    logger.info(f"Processing component with {len(component.children)} children")
+                    logger.info(
+                        f"Processing component with {len(component.children)} children"
+                    )
                     for child in component.children:
                         if child.type == discord.ComponentType.button:
-                            button_label = getattr(child, 'label', None)
-                            button_emoji = getattr(child, 'emoji', None)
-                            button_custom_id = getattr(child, 'custom_id', 'unknown')
-                            
-                            logger.info(f"Found button - Label: {button_label}, Emoji: {button_emoji}, Custom ID: {button_custom_id}, Disabled: {getattr(child, 'disabled', False)}")
-                            
+                            button_label = getattr(child, "label", None)
+                            button_emoji = getattr(child, "emoji", None)
+                            button_custom_id = getattr(child, "custom_id", "unknown")
+
+                            logger.info(
+                                f"Found button - Label: {button_label}, Emoji: {button_emoji}, Custom ID: {button_custom_id}, Disabled: {getattr(child, 'disabled', False)}"
+                            )
+
                             # Store button with its properties
                             button_info = {
-                                'button': child,
-                                'label': button_label,
-                                'emoji': button_emoji,
-                                'custom_id': button_custom_id,
-                                'disabled': getattr(child, 'disabled', False)
+                                "button": child,
+                                "label": button_label,
+                                "emoji": button_emoji,
+                                "custom_id": button_custom_id,
+                                "disabled": getattr(child, "disabled", False),
                             }
                             all_buttons.append(button_info)
-                
+
                 if not all_buttons:
                     logger.warning("No buttons found in tip.cc message")
-                    await ctx.send("💀 **Could not find any buttons in tip.cc response**")
+                    await ctx.send(
+                        "💀 **Could not find any buttons in tip.cc response**"
+                    )
                     return
-                
+
                 # Step 1: Click the next-page button (▶)
                 next_page_button = None
                 for button_info in all_buttons:
-                    if 'next-page' in button_info['custom_id'].lower() and not button_info['disabled']:
+                    if (
+                        "next-page" in button_info["custom_id"].lower()
+                        and not button_info["disabled"]
+                    ):
                         next_page_button = button_info
                         logger.info("Found next-page button")
                         break
-                
+
                 if next_page_button:
                     try:
                         logger.info(f"Step 1: Clicking next-page button")
-                        await next_page_button['button'].click()
+                        await next_page_button["button"].click()
                         logger.info("Successfully clicked next-page button")
-                        
+
                         # Wait a moment for the page to update
                         await asyncio.sleep(2)
-                        
+
                         # Step 2: Find and click the dismiss button (❌)
                         await asyncio.sleep(3)  # Additional wait before dismiss
-                        
+
                         # Refresh the message to get updated components
                         updated_message = None
                         async for msg in ctx.channel.history(limit=10):
                             if msg.id == message.id:  # Same message ID
                                 updated_message = msg
                                 break
-                        
+
                         if updated_message and updated_message.components:
                             logger.info("Looking for dismiss button in updated message")
                             dismiss_button = None
-                            
+
                             for component in updated_message.components:
                                 for child in component.children:
                                     if child.type == discord.ComponentType.button:
-                                        button_emoji = getattr(child, 'emoji', None)
-                                        button_custom_id = getattr(child, 'custom_id', 'unknown')
-                                        
+                                        button_emoji = getattr(child, "emoji", None)
+                                        button_custom_id = getattr(
+                                            child, "custom_id", "unknown"
+                                        )
+
                                         # Look for dismiss button by emoji or custom_id
-                                        if button_emoji and hasattr(button_emoji, 'name') and button_emoji.name in ['❌', '✖️', 'x', 'X']:
+                                        if (
+                                            button_emoji
+                                            and hasattr(button_emoji, "name")
+                                            and button_emoji.name
+                                            in ["❌", "✖️", "x", "X"]
+                                        ):
                                             dismiss_button = child
-                                            logger.info(f"Found dismiss button by emoji: {button_emoji.name}")
+                                            logger.info(
+                                                f"Found dismiss button by emoji: {button_emoji.name}"
+                                            )
                                             break
-                                        elif 'dismiss' in button_custom_id.lower() or 'close' in button_custom_id.lower():
+                                        elif (
+                                            "dismiss" in button_custom_id.lower()
+                                            or "close" in button_custom_id.lower()
+                                        ):
                                             dismiss_button = child
-                                            logger.info(f"Found dismiss button by custom_id: {button_custom_id}")
+                                            logger.info(
+                                                f"Found dismiss button by custom_id: {button_custom_id}"
+                                            )
                                             break
-                                
+
                                 if dismiss_button:
                                     break
-                            
-                            if dismiss_button and not getattr(dismiss_button, 'disabled', False):
+
+                            if dismiss_button and not getattr(
+                                dismiss_button, "disabled", False
+                            ):
                                 try:
                                     logger.info(f"Step 2: Clicking dismiss button")
                                     await dismiss_button.click()
-                                    logger.info("Successfully clicked dismiss button - message should be dismissed")
+                                    logger.info(
+                                        "Successfully clicked dismiss button - message should be dismissed"
+                                    )
                                     return
                                 except discord.errors.HTTPException as e:
                                     logger.error(f"Failed to click dismiss button: {e}")
                                     # Don't return error to user since the next-page already worked
                                     return
                             else:
-                                logger.warning("Could not find or click dismiss button, but next-page worked")
+                                logger.warning(
+                                    "Could not find or click dismiss button, but next-page worked"
+                                )
                                 return
-                        
+
                     except discord.errors.HTTPException as e:
                         logger.error(f"Failed to click next-page button: {e}")
                         await ctx.send(handle_command_error(e, ctx, "next_page_button"))
                         return
                     except Exception as e:
-                        logger.error(f"Unexpected error in two-step button process: {e}")
+                        logger.error(
+                            f"Unexpected error in two-step button process: {e}"
+                        )
                         await ctx.send(handle_command_error(e, ctx, "two_step_process"))
                         return
                 else:
                     # Fallback: Try to find any enabled button (including dismiss)
                     logger.info("No next-page button found, trying fallback logic")
                     for button_info in all_buttons:
-                        if not button_info['disabled']:
+                        if not button_info["disabled"]:
                             try:
-                                logger.info(f"Fallback: Clicking button: {button_info['custom_id']}")
-                                await button_info['button'].click()
+                                logger.info(
+                                    f"Fallback: Clicking button: {button_info['custom_id']}"
+                                )
+                                await button_info["button"].click()
                                 logger.info("Fallback button click successful")
                                 return
                             except Exception as e:
                                 logger.error(f"Fallback button click failed: {e}")
                                 continue
-                    
+
                     await ctx.send("💀 **No clickable buttons found**")
                     return
-                
+
                 break
         else:
             logger.warning("No message from tip.cc bot found with components")
@@ -1041,131 +1156,173 @@ def setup_commands(bot_instance):
 
     @bot_instance.command(name="bals")
     async def check_balance_alias(ctx):
-        """Check tip.cc balances and click button on response (alias for bal)"""
+        """Check tip.cc balances and click button on response (alias for bal) (admin only)"""
+        # Check if user is admin
+        if not is_admin(ctx.author.id):
+            await ctx.send(
+                "💀 **Admin only command bro!** You can't view Jakey's balances!"
+            )
+            return
+
         await ctx.send("$bals top")
         await asyncio.sleep(10)
 
         # Find the last message from user 617037497574359050 (tip.cc bot)
         async for message in ctx.channel.history(limit=50):
             if message.author.id == 617037497574359050 and message.components:
-                logger.info(f"Found tip.cc message with {len(message.components)} component(s)")
-                
+                logger.info(
+                    f"Found tip.cc message with {len(message.components)} component(s)"
+                )
+
                 # Collect all buttons from all components
                 all_buttons = []
                 for component in message.components:
-                    logger.info(f"Processing component with {len(component.children)} children")
+                    logger.info(
+                        f"Processing component with {len(component.children)} children"
+                    )
                     for child in component.children:
                         if child.type == discord.ComponentType.button:
-                            button_label = getattr(child, 'label', None)
-                            button_emoji = getattr(child, 'emoji', None)
-                            button_custom_id = getattr(child, 'custom_id', 'unknown')
-                            
-                            logger.info(f"Found button - Label: {button_label}, Emoji: {button_emoji}, Custom ID: {button_custom_id}, Disabled: {getattr(child, 'disabled', False)}")
-                            
+                            button_label = getattr(child, "label", None)
+                            button_emoji = getattr(child, "emoji", None)
+                            button_custom_id = getattr(child, "custom_id", "unknown")
+
+                            logger.info(
+                                f"Found button - Label: {button_label}, Emoji: {button_emoji}, Custom ID: {button_custom_id}, Disabled: {getattr(child, 'disabled', False)}"
+                            )
+
                             # Store button with its properties
                             button_info = {
-                                'button': child,
-                                'label': button_label,
-                                'emoji': button_emoji,
-                                'custom_id': button_custom_id,
-                                'disabled': getattr(child, 'disabled', False)
+                                "button": child,
+                                "label": button_label,
+                                "emoji": button_emoji,
+                                "custom_id": button_custom_id,
+                                "disabled": getattr(child, "disabled", False),
                             }
                             all_buttons.append(button_info)
-                
+
                 if not all_buttons:
                     logger.warning("No buttons found in tip.cc message")
-                    await ctx.send("💀 **Could not find any buttons in tip.cc response**")
+                    await ctx.send(
+                        "💀 **Could not find any buttons in tip.cc response**"
+                    )
                     return
-                
+
                 # Step 1: Click the next-page button (▶)
                 next_page_button = None
                 for button_info in all_buttons:
-                    if 'next-page' in button_info['custom_id'].lower() and not button_info['disabled']:
+                    if (
+                        "next-page" in button_info["custom_id"].lower()
+                        and not button_info["disabled"]
+                    ):
                         next_page_button = button_info
                         logger.info("Found next-page button")
                         break
-                
+
                 if next_page_button:
                     try:
                         logger.info(f"Step 1: Clicking next-page button")
-                        await next_page_button['button'].click()
+                        await next_page_button["button"].click()
                         logger.info("Successfully clicked next-page button")
-                        
+
                         # Wait a moment for the page to update
                         await asyncio.sleep(2)
-                        
+
                         # Step 2: Find and click the dismiss button (❌)
                         await asyncio.sleep(3)  # Additional wait before dismiss
-                        
+
                         # Refresh the message to get updated components
                         updated_message = None
                         async for msg in ctx.channel.history(limit=10):
                             if msg.id == message.id:  # Same message ID
                                 updated_message = msg
                                 break
-                        
+
                         if updated_message and updated_message.components:
                             logger.info("Looking for dismiss button in updated message")
                             dismiss_button = None
-                            
+
                             for component in updated_message.components:
                                 for child in component.children:
                                     if child.type == discord.ComponentType.button:
-                                        button_emoji = getattr(child, 'emoji', None)
-                                        button_custom_id = getattr(child, 'custom_id', 'unknown')
-                                        
+                                        button_emoji = getattr(child, "emoji", None)
+                                        button_custom_id = getattr(
+                                            child, "custom_id", "unknown"
+                                        )
+
                                         # Look for dismiss button by emoji or custom_id
-                                        if button_emoji and hasattr(button_emoji, 'name') and button_emoji.name in ['❌', '✖️', 'x', 'X']:
+                                        if (
+                                            button_emoji
+                                            and hasattr(button_emoji, "name")
+                                            and button_emoji.name
+                                            in ["❌", "✖️", "x", "X"]
+                                        ):
                                             dismiss_button = child
-                                            logger.info(f"Found dismiss button by emoji: {button_emoji.name}")
+                                            logger.info(
+                                                f"Found dismiss button by emoji: {button_emoji.name}"
+                                            )
                                             break
-                                        elif 'dismiss' in button_custom_id.lower() or 'close' in button_custom_id.lower():
+                                        elif (
+                                            "dismiss" in button_custom_id.lower()
+                                            or "close" in button_custom_id.lower()
+                                        ):
                                             dismiss_button = child
-                                            logger.info(f"Found dismiss button by custom_id: {button_custom_id}")
+                                            logger.info(
+                                                f"Found dismiss button by custom_id: {button_custom_id}"
+                                            )
                                             break
-                                
+
                                 if dismiss_button:
                                     break
-                            
-                            if dismiss_button and not getattr(dismiss_button, 'disabled', False):
+
+                            if dismiss_button and not getattr(
+                                dismiss_button, "disabled", False
+                            ):
                                 try:
                                     logger.info(f"Step 2: Clicking dismiss button")
                                     await dismiss_button.click()
-                                    logger.info("Successfully clicked dismiss button - message should be dismissed")
+                                    logger.info(
+                                        "Successfully clicked dismiss button - message should be dismissed"
+                                    )
                                     return
                                 except discord.errors.HTTPException as e:
                                     logger.error(f"Failed to click dismiss button: {e}")
                                     # Don't return error to user since the next-page already worked
                                     return
                             else:
-                                logger.warning("Could not find or click dismiss button, but next-page worked")
+                                logger.warning(
+                                    "Could not find or click dismiss button, but next-page worked"
+                                )
                                 return
-                        
+
                     except discord.errors.HTTPException as e:
                         logger.error(f"Failed to click next-page button: {e}")
                         await ctx.send(handle_command_error(e, ctx, "next_page_button"))
                         return
                     except Exception as e:
-                        logger.error(f"Unexpected error in two-step button process: {e}")
+                        logger.error(
+                            f"Unexpected error in two-step button process: {e}"
+                        )
                         await ctx.send(handle_command_error(e, ctx, "two_step_process"))
                         return
                 else:
                     # Fallback: Try to find any enabled button (including dismiss)
                     logger.info("No next-page button found, trying fallback logic")
                     for button_info in all_buttons:
-                        if not button_info['disabled']:
+                        if not button_info["disabled"]:
                             try:
-                                logger.info(f"Fallback: Clicking button: {button_info['custom_id']}")
-                                await button_info['button'].click()
+                                logger.info(
+                                    f"Fallback: Clicking button: {button_info['custom_id']}"
+                                )
+                                await button_info["button"].click()
                                 logger.info("Fallback button click successful")
                                 return
                             except Exception as e:
                                 logger.error(f"Fallback button click failed: {e}")
                                 continue
-                    
+
                     await ctx.send("💀 **No clickable buttons found**")
                     return
-                
+
                 break
         else:
             logger.warning("No message from tip.cc bot found with components")
@@ -1175,48 +1332,62 @@ def setup_commands(bot_instance):
     async def handle_confirmation(ctx):
         """Manually check for and click Confirm button on tip.cc confirmation messages"""
         await ctx.send("🔍 **Looking for tip.cc confirmation messages...**")
-        
+
         found_confirmation = False
         # Search recent messages for tip.cc confirmation embeds
         async for message in ctx.channel.history(limit=20):
-            if (message.author.id == 617037497574359050 and  # tip.cc bot ID
-                message.embeds and 
-                message.components):
-                
+            if (
+                message.author.id == 617037497574359050  # tip.cc bot ID
+                and message.embeds
+                and message.components
+            ):
                 embed = message.embeds[0]
                 if embed.title and "confirm" in embed.title.lower():
                     found_confirmation = True
                     logger.info(f"Found confirmation message: {embed.title}")
-                    
+
                     # Look for Confirm button
                     confirm_button = None
                     for component in message.components:
-                        for child in getattr(component, 'children', []):
-                            if hasattr(child, 'type') and child.type == discord.ComponentType.button:
-                                button_label = getattr(child, 'label', '').lower()
-                                button_custom_id = getattr(child, 'custom_id', '').lower()
-                                
-                                if (button_label == 'confirm' or 
-                                    'confirm' in button_custom_id or
-                                    'accept' in button_custom_id):
+                        for child in getattr(component, "children", []):
+                            if (
+                                hasattr(child, "type")
+                                and child.type == discord.ComponentType.button
+                            ):
+                                button_label = getattr(child, "label", "").lower()
+                                button_custom_id = getattr(
+                                    child, "custom_id", ""
+                                ).lower()
+
+                                if (
+                                    button_label == "confirm"
+                                    or "confirm" in button_custom_id
+                                    or "accept" in button_custom_id
+                                ):
                                     confirm_button = child
                                     logger.info("Found Confirm button")
                                     break
-                    
-                    if confirm_button and not getattr(confirm_button, 'disabled', False):
+
+                    if confirm_button and not getattr(
+                        confirm_button, "disabled", False
+                    ):
                         try:
                             await confirm_button.click()
-                            await ctx.send("✅ **Successfully clicked Confirm button!**")
+                            await ctx.send(
+                                "✅ **Successfully clicked Confirm button!**"
+                            )
                             logger.info("Manually clicked Confirm button")
                             return
                         except Exception as e:
-                            await ctx.send(f"💀 **Failed to click Confirm button:** {str(e)}")
+                            await ctx.send(
+                                f"💀 **Failed to click Confirm button:** {str(e)}"
+                            )
                             logger.error(f"Failed to click Confirm button: {e}")
                             return
                     else:
                         await ctx.send("💀 **Confirm button not found or disabled**")
                         return
-        
+
         if not found_confirmation:
             await ctx.send("💀 **No tip.cc confirmation messages found**")
 
@@ -1278,11 +1449,16 @@ def setup_commands(bot_instance):
                 # Set the current model
                 bot_instance.current_model = model_name
                 # If switching back to a Pollinations model, cancel any pending restoration
-                if hasattr(bot_instance, 'current_api_provider') and bot_instance.current_api_provider == "openrouter":
+                if (
+                    hasattr(bot_instance, "current_api_provider")
+                    and bot_instance.current_api_provider == "openrouter"
+                ):
                     bot_instance.current_api_provider = "pollinations"
-                    if hasattr(bot_instance, 'cancel_fallback_restoration'):
+                    if hasattr(bot_instance, "cancel_fallback_restoration"):
                         bot_instance.cancel_fallback_restoration()
-                        logger.info(f"Manually switched back to Pollinations model {model_name}, cancelled automatic restoration")
+                        logger.info(
+                            f"Manually switched back to Pollinations model {model_name}, cancelled automatic restoration"
+                        )
                 await ctx.send(f"💀 **Model updated to:** {model_name}")
             else:
                 await ctx.send(
@@ -1299,38 +1475,48 @@ def setup_commands(bot_instance):
         if not is_admin(ctx.author.id):
             await ctx.send("💀 Admin only command bro!")
             return
-            
+
         try:
-            if hasattr(bot_instance, 'get_fallback_status'):
+            if hasattr(bot_instance, "get_fallback_status"):
                 status = bot_instance.get_fallback_status()
-                
-                from config import OPENROUTER_FALLBACK_RESTORE_ENABLED, OPENROUTER_FALLBACK_TIMEOUT
-                
+
+                from config import (
+                    OPENROUTER_FALLBACK_RESTORE_ENABLED,
+                    OPENROUTER_FALLBACK_TIMEOUT,
+                )
+
                 response = f"🔄 **Fallback Restoration Status:**\n\n"
                 response += f"**Current Provider:** {status['current_provider']}\n"
                 response += f"**Current Model:** {status['current_model']}\n"
                 response += f"**Auto-Restore Enabled:** {'✅ Yes' if OPENROUTER_FALLBACK_RESTORE_ENABLED else '❌ No'}\n"
-                response += f"**Restore Timeout:** {OPENROUTER_FALLBACK_TIMEOUT} seconds\n\n"
-                
-                if status['is_fallback_active']:
+                response += (
+                    f"**Restore Timeout:** {OPENROUTER_FALLBACK_TIMEOUT} seconds\n\n"
+                )
+
+                if status["is_fallback_active"]:
                     response += "🔴 **Status:** Currently using OpenRouter fallback\n"
-                    if status['fallback_start_time']:
+                    if status["fallback_start_time"]:
                         import time
-                        elapsed = status.get('fallback_elapsed_seconds', 0)
-                        remaining = status.get('fallback_remaining_seconds', 0)
-                        progress = status.get('fallback_progress_percent', 0)
-                        
+
+                        elapsed = status.get("fallback_elapsed_seconds", 0)
+                        remaining = status.get("fallback_remaining_seconds", 0)
+                        progress = status.get("fallback_progress_percent", 0)
+
                         response += f"⏱️ **Fallback Duration:** {elapsed:.0f}s elapsed\n"
-                        response += f"⏳ **Time Until Restore:** {remaining:.0f}s remaining\n"
+                        response += (
+                            f"⏳ **Time Until Restore:** {remaining:.0f}s remaining\n"
+                        )
                         response += f"📊 **Progress:** {progress:.1f}%\n"
                         response += f"🔄 **Original Model:** {status.get('original_model', 'Unknown')}\n"
                 else:
                     response += "✅ **Status:** Using primary provider (Pollinations)\n"
-                
+
                 await ctx.send(response)
             else:
-                await ctx.send("💀 **Fallback status not available** - feature may be disabled")
-                
+                await ctx.send(
+                    "💀 **Fallback status not available** - feature may be disabled"
+                )
+
         except Exception as e:
             await ctx.send(f"💀 **Failed to get fallback status:** {str(e)}")
 
@@ -1341,25 +1527,31 @@ def setup_commands(bot_instance):
         if not is_admin(ctx.author.id):
             await ctx.send("💀 Admin only command bro!")
             return
-            
+
         try:
             from config import MESSAGE_QUEUE_ENABLED
-            
+
             if not MESSAGE_QUEUE_ENABLED:
                 await ctx.send("💀 **Message queue is disabled**")
                 return
-                
-            if not hasattr(bot_instance, 'message_queue_integration') or not bot_instance.message_queue_integration:
+
+            if (
+                not hasattr(bot_instance, "message_queue_integration")
+                or not bot_instance.message_queue_integration
+            ):
                 await ctx.send("💀 **Message queue integration not available**")
                 return
-                
+
             # Get queue statistics
             queue_integration = bot_instance.message_queue_integration
-            
+
             # Get queue stats
-            if hasattr(queue_integration, 'message_queue') and queue_integration.message_queue:
+            if (
+                hasattr(queue_integration, "message_queue")
+                and queue_integration.message_queue
+            ):
                 stats = await queue_integration.message_queue.get_queue_stats()
-                
+
                 response = f"📊 **Message Queue Status:**\n\n"
                 response += f"**Enabled:** ✅ Yes\n"
                 response += f"**Total Messages:** {stats.get('total_messages', 0)}\n"
@@ -1368,58 +1560,69 @@ def setup_commands(bot_instance):
                 response += f"**Completed:** {stats.get('completed_messages', 0)}\n"
                 response += f"**Failed:** {stats.get('failed_messages', 0)}\n"
                 response += f"**Dead Letter:** {stats.get('dead_letter_messages', 0)}\n"
-                
+
                 # Add queue age information
-                if stats.get('oldest_message_age'):
-                    age_seconds = stats['oldest_message_age']
+                if stats.get("oldest_message_age"):
+                    age_seconds = stats["oldest_message_age"]
                     if age_seconds > 60:
                         age_minutes = age_seconds / 60
-                        response += f"**Oldest Message:** {age_minutes:.1f} minutes old\n"
+                        response += (
+                            f"**Oldest Message:** {age_minutes:.1f} minutes old\n"
+                        )
                     else:
-                        response += f"**Oldest Message:** {age_seconds:.0f} seconds old\n"
-                
+                        response += (
+                            f"**Oldest Message:** {age_seconds:.0f} seconds old\n"
+                        )
+
                 response += "\n"
-                
+
                 # Processing stats
-                if hasattr(queue_integration, 'processor') and queue_integration.processor:
+                if (
+                    hasattr(queue_integration, "processor")
+                    and queue_integration.processor
+                ):
                     proc_stats = queue_integration.processor.get_stats()
-                    if isinstance(proc_stats, dict) and 'overall' in proc_stats:
-                        overall = proc_stats['overall']
+                    if isinstance(proc_stats, dict) and "overall" in proc_stats:
+                        overall = proc_stats["overall"]
                         response += f"**🔄 Processing Stats:**\n"
                         response += f"Processed: {overall.get('processed_count', 0)}\n"
                         response += f"Success Rate: {overall.get('success_rate', 0) * 100:.1f}%\n"
                         response += f"Avg Time: {overall.get('average_processing_time', 0):.2f}s\n"
-                        response += f"Rate: {overall.get('messages_per_second', 0):.1f} msg/s\n"
-                        
+                        response += (
+                            f"Rate: {overall.get('messages_per_second', 0):.1f} msg/s\n"
+                        )
+
                         # Add recent performance if available
-                        if 'recent' in proc_stats:
-                            recent = proc_stats['recent']
+                        if "recent" in proc_stats:
+                            recent = proc_stats["recent"]
                             response += f"Recent Success Rate: {recent.get('success_rate', 0) * 100:.1f}%\n"
                         response += "\n"
-                
+
                 # Health status
-                if hasattr(queue_integration, 'monitor') and queue_integration.monitor:
+                if hasattr(queue_integration, "monitor") and queue_integration.monitor:
                     try:
                         health = queue_integration.monitor.get_health_status()
                         if isinstance(health, dict):
                             response += f"**🏥 Health Status:** {health.get('status', 'Unknown')}\n"
-                            
-                            alerts = health.get('alerts', [])
+
+                            alerts = health.get("alerts", [])
                             if alerts:
                                 response += f"**🚨 Alerts:** {len(alerts)} active\n"
                                 # Show top 3 alerts
                                 for alert in alerts[:3]:
-                                    response += f"  • {alert.get('message', 'Unknown alert')}\n"
+                                    response += (
+                                        f"  • {alert.get('message', 'Unknown alert')}\n"
+                                    )
                             else:
                                 response += "**🚨 Alerts:** None\n"
                     except Exception as e:
                         logger.warning(f"Failed to get queue health status: {e}")
                         response += "**🏥 Health Status:** Unavailable\n"
-                
+
                 await ctx.send(response)
             else:
                 await ctx.send("💀 **Queue statistics not available**")
-                
+
         except Exception as e:
             await ctx.send(f"💀 **Failed to get queue status:** {str(e)}")
 
@@ -1430,35 +1633,41 @@ def setup_commands(bot_instance):
         if not is_admin(ctx.author.id):
             await ctx.send("💀 Admin only command bro!")
             return
-            
+
         try:
             from config import MESSAGE_QUEUE_ENABLED
-            
+
             if not MESSAGE_QUEUE_ENABLED:
                 await ctx.send("💀 **Message queue is disabled**")
                 return
-                
-            if not hasattr(bot_instance, 'message_queue_integration') or not bot_instance.message_queue_integration:
+
+            if (
+                not hasattr(bot_instance, "message_queue_integration")
+                or not bot_instance.message_queue_integration
+            ):
                 await ctx.send("💀 **Message queue integration not available**")
                 return
-                
+
             queue_integration = bot_instance.message_queue_integration
-            
-            if not hasattr(queue_integration, 'processor') or not queue_integration.processor:
+
+            if (
+                not hasattr(queue_integration, "processor")
+                or not queue_integration.processor
+            ):
                 await ctx.send("💀 **Queue processor not available**")
                 return
-                
+
             # Manually trigger queue processing
             logger.info(f"Manual queue processing triggered by admin {ctx.author.id}")
-            
+
             # Process one batch
             processed = await queue_integration.processor.process_batch()
-            
+
             if processed > 0:
                 await ctx.send(f"✅ **Processed {processed} messages from queue**")
             else:
                 await ctx.send("ℹ️ **No messages to process in queue**")
-                
+
         except Exception as e:
             logger.error(f"Manual queue processing failed: {e}")
             await ctx.send(f"💀 **Failed to process queue:** {str(e)}")
@@ -1467,21 +1676,21 @@ def setup_commands(bot_instance):
     async def airdrop_status(ctx):
         """Show current airdrop configuration and status"""
         from config import (
-            AIRDROP_PRESENCE,
-            AIRDROP_CPM_MIN,
             AIRDROP_CPM_MAX,
-            AIRDROP_SMART_DELAY,
-            AIRDROP_RANGE_DELAY,
-            AIRDROP_DELAY_MIN,
+            AIRDROP_CPM_MIN,
             AIRDROP_DELAY_MAX,
-            AIRDROP_IGNORE_DROPS_UNDER,
-            AIRDROP_IGNORE_TIME_UNDER,
-            AIRDROP_IGNORE_USERS,
+            AIRDROP_DELAY_MIN,
             AIRDROP_DISABLE_AIRDROP,
-            AIRDROP_DISABLE_TRIVIADROP,
             AIRDROP_DISABLE_MATHDROP,
             AIRDROP_DISABLE_PHRASEDROP,
             AIRDROP_DISABLE_REDPACKET,
+            AIRDROP_DISABLE_TRIVIADROP,
+            AIRDROP_IGNORE_DROPS_UNDER,
+            AIRDROP_IGNORE_TIME_UNDER,
+            AIRDROP_IGNORE_USERS,
+            AIRDROP_PRESENCE,
+            AIRDROP_RANGE_DELAY,
+            AIRDROP_SMART_DELAY,
         )
 
         # Build status response
@@ -1593,37 +1802,55 @@ def setup_commands(bot_instance):
             # Import OpenRouter here to avoid circular imports
             try:
                 from ai.openrouter import openrouter_api
+
                 openrouter_health = openrouter_api.check_service_health()
             except ImportError:
-                openrouter_health = {"healthy": False, "status": "not_available", "error": "OpenRouter not available"}
+                openrouter_health = {
+                    "healthy": False,
+                    "status": "not_available",
+                    "error": "OpenRouter not available",
+                }
 
             response = "**🤖 AI SERVICE STATUS**\n\n"
 
             # Pollinations AI Status
             if pollinations_health["healthy"]:
                 response += "✅ **Pollinations AI**: Online and healthy\n"
-                response += f"⚡ Response time: {pollinations_health['response_time']:.2f}s\n"
+                response += (
+                    f"⚡ Response time: {pollinations_health['response_time']:.2f}s\n"
+                )
             else:
                 response += f"❌ **Pollinations AI**: {pollinations_health['error']}\n"
                 response += f"🔍 Status: `{pollinations_health['status']}`\n"
 
                 # Provide helpful advice based on status
-                if pollinations_health["status"] in ["bad_gateway", "service_unavailable"]:
+                if pollinations_health["status"] in [
+                    "bad_gateway",
+                    "service_unavailable",
+                ]:
                     response += "\n💡 **What this means:** The AI service is temporarily down.\n"
                     response += "🔄 **Try again:** In a few minutes\n"
-                    response += "📋 **Alternative:** OpenRouter fallback may be available\n"
+                    response += (
+                        "📋 **Alternative:** OpenRouter fallback may be available\n"
+                    )
                 elif pollinations_health["status"] == "timeout":
-                    response += "\n💡 **What this means:** The service is slow to respond.\n"
+                    response += (
+                        "\n💡 **What this means:** The service is slow to respond.\n"
+                    )
                     response += "🔄 **Try again:** In a minute or two\n"
                 elif pollinations_health["status"] == "connection_error":
-                    response += "\n💡 **What this means:** Cannot connect to the AI service.\n"
+                    response += (
+                        "\n💡 **What this means:** Cannot connect to the AI service.\n"
+                    )
                     response += "🔄 **Try again:** Check your internet connection\n"
 
             # OpenRouter AI Status
             response += "\n"
             if openrouter_health["healthy"]:
                 response += "✅ **OpenRouter AI**: Online and healthy (Fallback)\n"
-                response += f"⚡ Response time: {openrouter_health['response_time']:.2f}s\n"
+                response += (
+                    f"⚡ Response time: {openrouter_health['response_time']:.2f}s\n"
+                )
             elif openrouter_health["status"] == "disabled":
                 response += "⚠️ **OpenRouter AI**: Disabled in configuration\n"
             elif openrouter_health["status"] == "not_available":
@@ -1638,6 +1865,7 @@ def setup_commands(bot_instance):
 
             try:
                 from ai.openrouter import openrouter_api
+
                 if openrouter_api.enabled:
                     openrouter_models = openrouter_api.list_models()
             except ImportError:
@@ -1646,13 +1874,17 @@ def setup_commands(bot_instance):
                 logger.error(f"Error getting OpenRouter models: {e}")
 
             response += "\n🤖 **Available Models:**\n"
-            response += "**Pollinations**: " + ", ".join(pollinations_models[:10])  # Limit to first 10
+            response += "**Pollinations**: " + ", ".join(
+                pollinations_models[:10]
+            )  # Limit to first 10
             if len(pollinations_models) > 10:
                 response += f" (+{len(pollinations_models) - 10} more)"
             response += "\n"
-            
+
             if openrouter_models:
-                response += "**OpenRouter**: " + ", ".join(openrouter_models[:5])  # Limit to first 5
+                response += "**OpenRouter**: " + ", ".join(
+                    openrouter_models[:5]
+                )  # Limit to first 5
                 if len(openrouter_models) > 5:
                     response += f" (+{len(openrouter_models) - 5} more)"
             else:
@@ -1669,6 +1901,7 @@ def setup_commands(bot_instance):
                     free_models = 0
                     try:
                         from ai.openrouter import openrouter_api
+
                         if openrouter_api.enabled:
                             free_models = len(openrouter_api.get_free_models())
                     except:
@@ -1676,7 +1909,9 @@ def setup_commands(bot_instance):
                     response += f"  • OpenRouter: {len(openrouter_models)} models ({free_models} free)\n"
                 response += f"🔧 **Current model**: `{ctx.bot.current_model}`\n"
             else:
-                response += "\n⚠️ **Warning**: Could not fetch model list from any provider\n"
+                response += (
+                    "\n⚠️ **Warning**: Could not fetch model list from any provider\n"
+                )
 
             await ctx.send(response)
 
@@ -1690,7 +1925,7 @@ def setup_commands(bot_instance):
         if not is_admin(ctx.author.id):
             await ctx.send("❌ This command is for admins only.")
             return
-        
+
         try:
             ctx.bot.clear_model_cache()
             await ctx.send("✅ Model capabilities cache cleared successfully.")
@@ -1770,7 +2005,7 @@ def setup_commands(bot_instance):
                 "ist": "Asia/Kolkata",
                 "jst": "Asia/Tokyo",
                 "aest": "Australia/Sydney",
-                "utc": "UTC"
+                "utc": "UTC",
             }
 
             # Convert alias to proper timezone name
@@ -1788,7 +2023,9 @@ def setup_commands(bot_instance):
             now = datetime.now(tz)
 
             # Format the time and date
-            time_str = now.strftime("%I:%M:%S %p").lstrip("0")  # Remove leading zero from hour
+            time_str = now.strftime("%I:%M:%S %p").lstrip(
+                "0"
+            )  # Remove leading zero from hour
             date_str = now.strftime("%A, %B %d, %Y")
             iso_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
 
@@ -1845,7 +2082,9 @@ def setup_commands(bot_instance):
         await show_time(ctx, timezone_name)
 
     @bot_instance.command(name="add_reaction_role")
-    async def add_reaction_role_command(ctx, message_id: str, emoji: str, role: discord.Role):
+    async def add_reaction_role_command(
+        ctx, message_id: str, emoji: str, role: discord.Role
+    ):
         """Add a reaction role to a message (admin only)"""
         # Check if user is admin
         if not is_admin(ctx.author.id):
@@ -1861,14 +2100,20 @@ def setup_commands(bot_instance):
             await message.add_reaction(emoji)
 
             # Store the reaction role in the database
-            bot_instance.db.add_reaction_role(message_id, str(channel.id), emoji, str(role.id), str(ctx.guild.id))
+            bot_instance.db.add_reaction_role(
+                message_id, str(channel.id), emoji, str(role.id), str(ctx.guild.id)
+            )
 
-            await ctx.send(f"✅ **Reaction role added!** React with {emoji} to get the **{role.name}** role.")
+            await ctx.send(
+                f"✅ **Reaction role added!** React with {emoji} to get the **{role.name}** role."
+            )
 
         except discord.NotFound:
             await ctx.send("💀 Message not found. Make sure the message ID is correct.")
         except discord.Forbidden:
-            await ctx.send("💀 I don't have permission to add reactions to that message.")
+            await ctx.send(
+                "💀 I don't have permission to add reactions to that message."
+            )
         except Exception as e:
             await ctx.send(f"💀 Failed to add reaction role: {str(e)}")
 
@@ -1884,7 +2129,9 @@ def setup_commands(bot_instance):
             # Remove the reaction role from the database
             bot_instance.db.remove_reaction_role(message_id, emoji)
 
-            await ctx.send(f"✅ **Reaction role removed!** Removed {emoji} reaction from message {message_id}.")
+            await ctx.send(
+                f"✅ **Reaction role removed!** Removed {emoji} reaction from message {message_id}."
+            )
 
         except Exception as e:
             await ctx.send(f"💀 Failed to remove reaction role: {str(e)}")
@@ -1909,10 +2156,10 @@ def setup_commands(bot_instance):
 
             for i, rr in enumerate(reaction_roles, 1):
                 try:
-                    channel = bot_instance.get_channel(int(rr['channel_id']))
+                    channel = bot_instance.get_channel(int(rr["channel_id"]))
                     channel_name = channel.name if channel else "Unknown Channel"
 
-                    role = ctx.guild.get_role(int(rr['role_id']))
+                    role = ctx.guild.get_role(int(rr["role_id"]))
                     role_name = role.name if role else "Unknown Role"
 
                     response += f"{i}. **Channel:** #{channel_name} | **Message:** {rr['message_id']} | **Emoji:** {rr['emoji']} | **Role:** @{role_name}\n"
@@ -1997,14 +2244,14 @@ Just ask Jakey naturally:
 `%keno` - Generate random Keno numbers (3-10 numbers from 1-40) with visual board
 `%ind_addr` - Generate a random Indian name and address
 
-**💰 TIP.CC COMMANDS:**
-`%bal` / `%bals` - Check tip.cc balances and auto-dismiss response
-`%confirm` - Manually click Confirm button on tip.cc confirmation messages
+**💰 TIP.CC COMMANDS (Admin Only):**
+`%bal` / `%bals` - Check tip.cc balances and auto-dismiss response (admin)
+`%confirm` - Manually click Confirm button on tip.cc confirmation messages (admin)
 `%tip <user> <amount> <currency> [message]` - Send a tip to a user (admin)
 `%airdrop <amount> <currency> [for] <duration>` - Create an airdrop (admin)
-`%transactions [limit]` - Show recent tip.cc transaction history
-`%tipstats` - Show tip.cc statistics and earnings
-`%airdropstatus` - Show current airdrop configuration and status
+`%transactions [limit]` - Show recent tip.cc transaction history (admin)
+`%tipstats` - Show tip.cc statistics and earnings (admin)
+`%airdropstatus` - Show current airdrop configuration and status (admin)
 
 **🎨 AI & MEDIA COMMANDS:**
 `%image <prompt>` - Generate an image with artistic styles (supports 49 styles, 9 ratios)
@@ -2063,34 +2310,42 @@ Anime tattoo, Graffiti, Cinematic Art, Professional, Flux
         try:
             # Example format: male:123456789,female:987654321,neutral:111222333
             # Validate the format
-            parts = role_config.split(',')
+            parts = role_config.split(",")
             validated_config = []
 
             for part in parts:
-                if ':' in part:
-                    gender, role_id = part.split(':', 1)  # Split only on first ':'
+                if ":" in part:
+                    gender, role_id = part.split(":", 1)  # Split only on first ':'
                     gender = gender.strip().lower()
                     role_id = role_id.strip()
 
-                    if gender not in ['male', 'female', 'neutral']:
-                        await ctx.send(f"❌ Invalid gender: {gender}. Use male, female, or neutral.")
+                    if gender not in ["male", "female", "neutral"]:
+                        await ctx.send(
+                            f"❌ Invalid gender: {gender}. Use male, female, or neutral."
+                        )
                         return
 
                     try:
                         int(role_id)  # Validate that role is numeric
                         validated_config.append(f"{gender}:{role_id}")
                     except ValueError:
-                        await ctx.send(f"❌ Invalid role ID: {role_id}. Must be a number.")
+                        await ctx.send(
+                            f"❌ Invalid role ID: {role_id}. Must be a number."
+                        )
                         return
                 else:
-                    await ctx.send("❌ Invalid format. Use: gender:role_id,gender:role_id")
+                    await ctx.send(
+                        "❌ Invalid format. Use: gender:role_id,gender:role_id"
+                    )
                     return
 
             # Store in memory (this would ideally persist in database/config in production)
             # For now, just validate and show success
-            final_config = ','.join(validated_config)
+            final_config = ",".join(validated_config)
             await ctx.send(f"✅ Gender role mappings set:\n{final_config}")
-            await ctx.send("Note: This configuration won't persist after bot restart until database integration is added.")
+            await ctx.send(
+                "Note: This configuration won't persist after bot restart until database integration is added."
+            )
 
         except Exception as e:
             await ctx.send(handle_command_error(e, ctx, "set_gender_roles"))
@@ -2099,6 +2354,7 @@ Anime tattoo, Graffiti, Cinematic Art, Professional, Flux
     async def show_gender_roles(ctx):
         """Show current gender role mappings"""
         from utils.gender_roles import get_gender_role_config
+
         mappings = get_gender_role_config()
 
         if not mappings:
@@ -2107,8 +2363,12 @@ Anime tattoo, Graffiti, Cinematic Art, Professional, Flux
 
         response = "** configured gender role mappings:**\n"
         for gender, config in mappings.items():
-            roles = ', '.join([f"<@&{role_id}>" for role_id in config["roles"]]) if config["roles"] else "Not configured"
-            pronouns = '/'.join(config["pronouns"])
+            roles = (
+                ", ".join([f"<@&{role_id}>" for role_id in config["roles"]])
+                if config["roles"]
+                else "Not configured"
+            )
+            pronouns = "/".join(config["pronouns"])
             response += f"• {gender.title()}: {roles} (Pronouns: {pronouns})\n"
 
         await ctx.send(response)
@@ -2121,7 +2381,9 @@ Anime tattoo, Graffiti, Cinematic Art, Professional, Flux
             if success:
                 await ctx.send(f"✅ Added keyword: `{keyword}`")
             else:
-                await ctx.send(f"❌ Keyword `{keyword}` already exists or failed to add.")
+                await ctx.send(
+                    f"❌ Keyword `{keyword}` already exists or failed to add."
+                )
         except Exception as e:
             await ctx.send(handle_command_error(e, ctx, "add_keyword"))
 
@@ -2147,7 +2409,9 @@ Anime tattoo, Graffiti, Cinematic Art, Professional, Flux
                 response += "\n".join([f"• `{keyword}`" for keyword in keywords])
                 await ctx.send(response)
             else:
-                await ctx.send("💀 No keywords configured. Jakey only responds to mentions and his name.")
+                await ctx.send(
+                    "💀 No keywords configured. Jakey only responds to mentions and his name."
+                )
         except Exception as e:
             await ctx.send(handle_command_error(e, ctx, "list_keywords"))
 

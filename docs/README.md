@@ -43,7 +43,7 @@ Welcome to the comprehensive documentation for Jakey, the degenerate gambling Di
 - **AI/Media**: `%image`, `%audio`, `%analyze`, `%aistatus`
 - **Memory**: `%remember`, `%friends`
 - **Gambling**: `%rigged`, `%wen`, `%keno`, `%airdropstatus`, `%channelstats`, `%ind_addr`
-- **tip.cc**: `%bal`, `%transactions`, `%tipstats`
+- **tip.cc (Admin Only)**: `%bal`, `%transactions`, `%tipstats`
 - **Admin**: `%tip`, `%airdrop`, `%userinfo`, `%clearhistory`, `%clearallhistory`, `%clearchannelhistory`, `%set_gender_roles`, `%show_gender_roles`
 - **Role Management**: `%add_reaction_role`, `%remove_reaction_role`, `%list_reaction_roles`
 

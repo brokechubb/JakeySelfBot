@@ -249,7 +249,7 @@ Jakey features 35 comprehensive commands across 8 categories, all with built-in 
 **Example Usage:**
 
 - `%image a beautiful sunset in van gogh style` - Generate professional artistic images
-- `%bal` - Check cryptocurrency balances with USD conversion
+- `%bal` - Check cryptocurrency balances with USD conversion (admin only)
 - `%remember favorite_color blue` - Store user preferences
 - `%keno` - Generate random Keno numbers with visual board
 

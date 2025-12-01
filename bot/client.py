@@ -18,12 +18,12 @@ from discord import DMChannel, GroupChannel, TextChannel, Thread
 from discord.ext import commands
 from discord.ext.commands.view import StringView
 
+from ai.anti_repetition_integrator import anti_repetition_integrator
 from ai.openrouter import openrouter_api
 from ai.pollinations import pollinations_api
 
 # Import response uniqueness system
 from ai.response_uniqueness import response_uniqueness
-from ai.anti_repetition_integrator import anti_repetition_integrator
 
 # Import admin check function
 from bot.commands import is_admin
@@ -596,7 +596,14 @@ class JakeyBot(commands.Bot):
                             )
 
                             try:
-                                from resilience import MessagePriority
+                                # Archived: from resilience import MessagePriority
+                                # Define local MessagePriority for queued commands
+                                from enum import Enum
+                                class MessagePriority(Enum):
+                                    LOW = 1
+                                    NORMAL = 2
+                                    HIGH = 3
+                                    CRITICAL = 4
 
                                 # Determine priority based on command type
                                 priority = MessagePriority.NORMAL
@@ -1068,7 +1075,8 @@ class JakeyBot(commands.Bot):
 
                     # Format the message for context
                     author_name = msg.author.name
-                    if msg.author.nick:
+                    # Only check for nick if author is a Member object (User objects don't have nick)
+                    if hasattr(msg.author, "nick") and msg.author.nick:
                         author_name = f"{msg.author.nick} ({msg.author.name})"
 
                     # Add message to context with timestamp
@@ -1263,8 +1271,10 @@ class JakeyBot(commands.Bot):
 
                 # Apply advanced anti-repetition context enhancement (invisible)
                 user_id = str(message.author.id)
-                enhanced_system_content = anti_repetition_integrator.get_enhanced_system_prompt(
-                    user_id, system_content
+                enhanced_system_content = (
+                    anti_repetition_integrator.get_enhanced_system_prompt(
+                        user_id, system_content
+                    )
                 )
 
                 messages = [{"role": "system", "content": enhanced_system_content}]
@@ -1277,11 +1287,15 @@ class JakeyBot(commands.Bot):
 
                 # Add recent conversations in reverse order (newest first)
                 for i, conv in enumerate(recent_conversations):
-                    conv_messages = conv["messages"]
+                    # Ensure conv_messages is a mutable list
+                    conv_messages = list(conv["messages"])
                     # Check for None content in conversation messages
                     for j, msg in enumerate(conv_messages):
-                        if msg.get("content") is None:
+                        if isinstance(msg, dict) and msg.get("content") is None:
                             msg["content"] = ""
+                        elif isinstance(msg, str):
+                            # If msg is a string, convert it to a dict with role and content
+                            conv_messages[j] = {"role": "user", "content": msg}
 
                     conv_tokens = sum(
                         len((msg.get("content") or "").split()) for msg in conv_messages
@@ -1290,8 +1304,11 @@ class JakeyBot(commands.Bot):
                     if total_tokens + conv_tokens <= max_tokens:
                         # Check messages before adding them
                         for msg in conv_messages:
-                            if msg.get("content") is None:
+                            if isinstance(msg, dict) and msg.get("content") is None:
                                 msg["content"] = ""
+                            elif isinstance(msg, str):
+                                # If msg is a string, conversion already handled earlier
+                                pass  # String would have been converted to dict in earlier loop
                         messages.extend(conv_messages)
                         total_tokens += conv_tokens
                     else:
@@ -1400,8 +1417,11 @@ class JakeyBot(commands.Bot):
                 # Generate response with tool support
                 # Ensure all messages have valid content before sending
                 for i, msg in enumerate(messages):
-                    if msg.get("content") is None:
-                        # Fix None content
+                    if isinstance(msg, dict) and msg.get("content") is None:
+                        msg["content"] = ""
+                    elif isinstance(msg, str):
+                        # If msg is a string, convert it to a dict with role and content
+                        messages[i] = {"role": msg.get("role", "user"), "content": msg}
                         msg["content"] = ""
 
                 logger.info(
@@ -1940,14 +1960,25 @@ class JakeyBot(commands.Bot):
 
                     # Remove None content from messages before sending to API
                     for i, msg in enumerate(messages):
-                        if msg.get("content") is None:
-                            # Fix None content
+                        if isinstance(msg, dict) and msg.get("content") is None:
                             msg["content"] = ""
+                        elif isinstance(msg, str):
+                            # If msg is a string, convert it to a dict with role and content
+                            messages[i] = {
+                                "role": "user",
+                                "content": msg,
+                            }
 
                     # Ensure all messages have valid content before sending
                     for i, msg in enumerate(messages):
-                        if msg.get("content") is None:
+                        if isinstance(msg, dict) and msg.get("content") is None:
                             msg["content"] = ""
+                        elif isinstance(msg, str):
+                            # If msg is a string, convert it to a dict with role and content
+                            messages[i] = {
+                                "role": "user",
+                                "content": msg,
+                            }
 
                     # Trim messages to fit within API character limits (gpt-5-mini limit is ~7000 chars)
                     messages = self._trim_messages_for_api(messages, max_chars=6000)
@@ -2044,19 +2075,25 @@ class JakeyBot(commands.Bot):
                             user_id = str(message.author.id)
 
                             # Check if response needs enhancement
-                            should_enhance, reason = anti_repetition_integrator.should_enhance_response(
-                                user_id, response_text
+                            should_enhance, reason = (
+                                anti_repetition_integrator.should_enhance_response(
+                                    user_id, response_text
+                                )
                             )
 
                             if should_enhance:
-                                logger.debug(f"Response enhancement suggested for user {user_id}: {reason}")
+                                logger.debug(
+                                    f"Response enhancement suggested for user {user_id}: {reason}"
+                                )
                                 # In the new system, we don't generate fallback responses
                                 # Instead, we let the enhanced system prompt guide the AI
                                 # This makes the system invisible to users
                                 pass  # Response is still sent, but context is enhanced for next time
 
                             # Record the response for learning (lightweight operation)
-                            anti_repetition_integrator.record_response(user_id, response_text)
+                            anti_repetition_integrator.record_response(
+                                user_id, response_text
+                            )
 
                         logger.debug(f"Filtered response_text: '{response_text}'")
                     else:
@@ -2488,13 +2525,15 @@ class JakeyBot(commands.Bot):
                             if not button.disabled:
                                 await asyncio.wait_for(button.click(), timeout=5.0)
                                 await asyncio.sleep(2)
-                                await original_message.channel.send("beep boop beep...")
+                                # await original_message.channel.send("beep boop beep...")  # Disabled beep boop message
                                 logger.info(
                                     f"Entered airdrop in {original_message.channel.name}"
                                 )
                                 # Success inside if block
                             else:
-                                logger.warning("Airdrop button is disabled, drop may have expired")
+                                logger.warning(
+                                    "Airdrop button is disabled, drop may have expired"
+                                )
                             break  # Success or disabled, exit retry loop
                         except asyncio.TimeoutError:
                             logger.warning(
@@ -2503,8 +2542,19 @@ class JakeyBot(commands.Bot):
                             if attempt < 2:  # Don't sleep on the last attempt
                                 await asyncio.sleep(1)  # Reduced backoff time
                         except discord.HTTPException as e:
-                            logger.error(f"HTTP error clicking airdrop button: {e}")
-                            break  # Don't retry on HTTP errors
+                            if "50035" in str(e) and "Invalid Form Body" in str(e):
+                                logger.warning(
+                                    f"Invalid form body when clicking airdrop button (attempt {attempt + 1}/3) - button may be stale"
+                                )
+                                if attempt < 2:  # Only retry if we have more attempts
+                                    await asyncio.sleep(2)  # Wait longer before retry
+                                else:
+                                    logger.error(
+                                        "Airdrop button component appears to be invalid"
+                                    )
+                            else:
+                                logger.error(f"HTTP error clicking airdrop button: {e}")
+                                break  # Don't retry on other HTTP errors
                         except discord.ClientException as e:
                             logger.warning(
                                 f"Client error clicking airdrop button (likely timeout): {e}"
@@ -2775,241 +2825,6 @@ class JakeyBot(commands.Bot):
                 logger.error(f"Error in _check_due_reminders background task: {e}")
                 # Wait a bit before continuing to avoid rapid error loops
                 await asyncio.sleep(60)
-
-        """Process airdrop commands automatically"""
-        content = original_message.content.lower()
-
-        # Check if this is an airdrop command we should process
-        if not content.startswith(
-            (
-                "$airdrop",
-                "$triviadrop",
-                "$mathdrop",
-                "$phrasedrop",
-                "$redpacket",
-                "$ airdrop",
-                "$ triviadrop",
-                "$ mathdrop",
-                "$ phrasedrop",
-                "$ redpacket",
-            )
-        ):
-            return
-
-        # Check if user is in ignore list
-        ignore_users_list = (
-            AIRDROP_IGNORE_USERS.split(",") if AIRDROP_IGNORE_USERS else []
-        )
-        if str(original_message.author.id) in ignore_users_list:
-            return
-
-        logger.debug(f"Detected potential drop: {original_message.content}")
-
-        try:
-            # Wait for the tip.cc bot response
-            tip_cc_message = await self.wait_for(
-                "message",
-                timeout=15,
-                check=lambda m: (
-                    m.author.id == 617037497574359050
-                    and m.channel.id == original_message.channel.id
-                    and m.embeds
-                ),
-            )
-        except asyncio.TimeoutError:
-            logger.debug("Timeout waiting for tip.cc message.")
-            return
-
-        if not tip_cc_message.embeds:
-            return
-
-        embed = tip_cc_message.embeds[0]
-        drop_ends_in = (
-            (embed.timestamp.timestamp() - time.time()) if embed.timestamp else 5
-        )
-
-        # Apply delay logic
-        await self.maybe_delay(drop_ends_in)
-
-        try:
-            # Airdrop
-            if "airdrop" in embed.title.lower() and not AIRDROP_DISABLE_AIRDROP:
-                if tip_cc_message.components:
-                    button = tip_cc_message.components[0].children[0]
-                    # Add timeout handling and retry logic for button clicks
-                    for attempt in range(3):  # Retry up to 3 times
-                        try:
-                            # Validate button is still clickable before attempting
-                            if not button.disabled:
-                                await asyncio.wait_for(button.click(), timeout=5.0)
-                                await asyncio.sleep(2)
-                            await original_message.channel.send("beep boop beep...")
-                            logger.info(
-                                f"Entered airdrop in {original_message.channel.name}"
-                            )
-                            break  # Success, exit retry loop
-                            # else:
-                            logger.warning("Airdrop button is disabled, drop may have expired")  # Commented out - misplaced else
-                        except asyncio.TimeoutError:
-                            logger.warning(
-                                f"Timeout clicking airdrop button (attempt {attempt + 1}/3)"
-                            )
-                            if attempt < 2:  # Don't sleep on the last attempt
-                                await asyncio.sleep(1)  # Reduced backoff time
-                        except discord.HTTPException as e:
-                            logger.error(f"HTTP error clicking airdrop button: {e}")
-                            break  # Don't retry on HTTP errors
-                        except discord.ClientException as e:
-                            logger.warning(
-                                f"Client error clicking airdrop button (likely timeout): {e}"
-                            )
-                            if attempt < 2:  # Don't sleep on the last attempt
-                                await asyncio.sleep(1)  # Reduced backoff time
-                        except Exception as e:
-                            logger.error(
-                                f"Unexpected error clicking airdrop button: {e}"
-                            )
-                            break  # Don't retry on unexpected errors
-
-            # Phrase drop
-            elif (
-                "phrase drop" in embed.title.lower() and not AIRDROP_DISABLE_PHRASEDROP
-            ):
-                phrase = embed.description.replace("\n", "").replace("**", "")
-                phrase = phrase.split("*")[1].strip()
-                async with original_message.channel.typing():
-                    await asyncio.sleep(self.typing_delay(phrase))
-                await original_message.channel.send(phrase)
-                logger.info(f"Entered phrase drop in {original_message.channel.name}")
-
-            # Math drop
-            elif "math" in embed.title.lower() and not AIRDROP_DISABLE_MATHDROP:
-                expr = embed.description.split("`")[1].strip()
-                answer = self.safe_eval_math(expr)
-                if answer is not None:
-                    answer = (
-                        int(answer)
-                        if isinstance(answer, float) and answer.is_integer()
-                        else answer
-                    )
-                    async with original_message.channel.typing():
-                        await asyncio.sleep(self.typing_delay(str(answer)))
-                    await original_message.channel.send(str(answer))
-                    logger.info(f"Entered math drop in {original_message.channel.name}")
-
-            # Trivia drop
-            elif "trivia" in embed.title.lower() and not AIRDROP_DISABLE_TRIVIADROP:
-                category = embed.title.split("Trivia time - ")[1].strip()
-                question = embed.description.replace("**", "").split("*")[1].strip()
-
-                # VALIDATE category input to prevent directory traversal and injection attacks
-                if not self._validate_trivia_category(category):
-                    logger.warning(f"Invalid trivia category detected: {category}")
-                    return
-
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"https://raw.githubusercontent.com/QuartzWarrior/OTDB-Source/main/{quote(category)}.csv"
-                    ) as resp:
-                        if resp.status == 200:
-                            lines = (await resp.text()).splitlines()
-                            for line in lines:
-                                q, a = line.split(",", 1)
-                                if question == unquote(q).strip():
-                                    if tip_cc_message.components:
-                                        for button in tip_cc_message.components[
-                                            0
-                                        ].children:
-                                            if (
-                                                button.label.strip()
-                                                == unquote(a).strip()
-                                            ):
-                                                # Add timeout handling and retry logic for button clicks
-                                                for attempt in range(
-                                                    3
-                                                ):  # Retry up to 3 times
-                                                    try:
-                                                        await asyncio.wait_for(
-                                                            button.click(), timeout=10.0
-                                                        )
-                                                        logger.info(
-                                                            f"Entered trivia drop in {original_message.channel.name}"
-                                                        )
-                                                        return  # Success, exit function
-                                                    except asyncio.TimeoutError:
-                                                        logger.warning(
-                                                            f"Timeout clicking trivia button (attempt {attempt + 1}/3)"
-                                                        )
-                                                        if (
-                                                            attempt < 2
-                                                        ):  # Don't sleep on the last attempt
-                                                            await asyncio.sleep(
-                                                                2**attempt
-                                                            )  # Exponential backoff
-                                                    except discord.HTTPException as e:
-                                                        logger.error(
-                                                            f"HTTP error clicking trivia button: {e}"
-                                                        )
-                                                        return  # Don't retry on HTTP errors
-                                                    except discord.ClientException as e:
-                                                        logger.warning(
-                                                            f"Client error clicking trivia button (likely timeout): {e}"
-                                                        )
-                                                        if (
-                                                            attempt < 2
-                                                        ):  # Don't sleep on the last attempt
-                                                            await asyncio.sleep(
-                                                                2**attempt
-                                                            )  # Exponential backoff
-                                                    except Exception as e:
-                                                        logger.error(
-                                                            f"Unexpected error clicking trivia button: {e}"
-                                                        )
-                                                        return  # Don't retry on unexpected errors
-
-            # Redpacket
-            elif "appeared" in embed.title.lower() and not AIRDROP_DISABLE_REDPACKET:
-                if tip_cc_message.components:
-                    button = tip_cc_message.components[0].children[0]
-                    if "envelope" in button.label.lower():
-                        # Add timeout handling and retry logic for button clicks
-                        for attempt in range(3):  # Retry up to 3 times
-                            try:
-                                await asyncio.wait_for(button.click(), timeout=10.0)
-                                logger.info(
-                                    f"Claimed redpacket in {original_message.channel.name}"
-                                )
-                                break  # Success, exit retry loop
-                            except asyncio.TimeoutError:
-                                logger.warning(
-                                    f"Timeout clicking redpacket button (attempt {attempt + 1}/3)"
-                                )
-                                if attempt < 2:  # Don't sleep on the last attempt
-                                    await asyncio.sleep(
-                                        2**attempt
-                                    )  # Exponential backoff
-                            except discord.HTTPException as e:
-                                logger.error(
-                                    f"HTTP error clicking redpacket button: {e}"
-                                )
-                                break  # Don't retry on HTTP errors
-                            except discord.ClientException as e:
-                                logger.warning(
-                                    f"Client error clicking redpacket button (likely timeout): {e}"
-                                )
-                                if attempt < 2:  # Don't sleep on the last attempt
-                                    await asyncio.sleep(
-                                        2**attempt
-                                    )  # Exponential backoff
-                            except Exception as e:
-                                logger.error(
-                                    f"Unexpected error clicking redpacket button: {e}"
-                                )
-                                break  # Don't retry on unexpected errors
-
-        except (IndexError, AttributeError, discord.HTTPException, discord.NotFound):
-            logger.debug("Something went wrong while handling drop.")
-            return
 
     def typing_delay(self, text: str) -> float:
         """Simulate typing time based on CPM."""
@@ -3524,14 +3339,14 @@ class JakeyBot(commands.Bot):
 `%keno` - Generate random Keno numbers (3-10 numbers from 1-40)
 `%ind_addr` - Generate a random Indian name and address
 
-**💰 TIP.CC COMMANDS:**
-`%bal` / `%bals` - Check tip.cc balances and auto-dismiss response
-`%confirm` - Manually click Confirm button on tip.cc confirmation messages
+**💰 TIP.CC COMMANDS (Admin Only):**
+`%bal` / `%bals` - Check tip.cc balances and auto-dismiss response (admin)
+`%confirm` - Manually click Confirm button on tip.cc confirmation messages (admin)
 `%tip <user> <amount> <currency> [message]` - Send a tip to a user (admin)
 `%airdrop <amount> <currency> [for] <duration>` - Create an airdrop (admin)
-`%transactions [limit]` - Show recent tip.cc transaction history
-`%tipstats` - Show tip.cc statistics and earnings
-`%airdropstatus` - Show current airdrop configuration and status
+`%transactions [limit]` - Show recent tip.cc transaction history (admin)
+`%tipstats` - Show tip.cc statistics and earnings (admin)
+`%airdropstatus` - Show current airdrop configuration and status (admin)
 
 **🎨 AI & MEDIA COMMANDS:**
 `%image <prompt>` - Generate an image with artistic styles

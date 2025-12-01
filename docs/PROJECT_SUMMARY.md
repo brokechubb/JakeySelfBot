@@ -15,6 +15,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 ## Core Features
 
 ### AI Integration
+
 - Natural language conversations with degenerate gambling personality
 - Professional artistic image generation with 49 styles and 9 aspect ratios
 - Text-to-speech conversion with multiple voice options
@@ -23,6 +24,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 - Real-time web search with self-hosted SearXNG
 
 ### tip.cc Integration
+
 - **Comprehensive Balance Tracking**: Automatic tracking of all cryptocurrency balances with USD value conversion
 - **Transaction History**: Detailed logging of all tips, airdrops, deposits, and withdrawals
 - **Smart Command Sending**: Properly formatted tip.cc commands
@@ -30,6 +32,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 - **Multi-Currency Support**: Handle all supported cryptocurrencies with real-time price conversion
 
 ### Airdrop System
+
 - Automated claiming of various cryptocurrency airdrops
 - Support for standard, trivia, math, phrase drops, and red packets
 - Configurable delays and participation controls
@@ -37,6 +40,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 - Enhanced tracking of entries and winnings
 
 ### Utility Tools
+
 - Crypto price checking with CoinMarketCap API
 - Currency conversion and financial calculations
 - Mathematical calculations with safe evaluation
@@ -49,6 +53,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 ## Command Structure (22 Total)
 
 ### Core Commands (6)
+
 - `%help` - Comprehensive help information
 - `%ping` - Bot connectivity check
 - `%stats` - Performance metrics
@@ -57,15 +62,18 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 - `%imagemodels` - List 49 artistic styles
 
 ### AI & Media Commands (3)
+
 - `%image <prompt>` - Professional image generation
 - `%audio <text>` - Text-to-speech conversion
 - `%analyze <url> [prompt]` - Image analysis
 
 ### Memory & User Commands (2)
+
 - `%remember <type> <info>` - Store user information
 - `%friends` - List Jakey's friends
 
 ### Gambling & Utility Commands (7)
+
 - `%rigged` - Classic Jakey response
 - `%wen <item>` - Bonus schedule information
 - `%keno` - Keno number generator with visual board
@@ -73,14 +81,14 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 - `%channelstats` - Channel conversation statistics
 - `%ind_addr` - Random Indian name/address generator
 
-### tip.cc Commands (3)
+### tip.cc Commands (Admin Only) (3)
+
 - `%bal` / `%bals` - Balance tracking
 - `%transactions [limit]` - Transaction history
 - `%tipstats` - Comprehensive tip statistics
 
-### Admin Commands (4)
-- `%tip <recipient> <amount> <currency> [msg]` - Send tips
-- `%airdrop <amount> <currency> <duration>` - Create airdrops
+### Admin Commands (2)
+
 - `%userinfo [user]` - User information
 - `%clearhistory [user]` - Clear conversation history
 - `%clearallhistory` - Clear all history
@@ -89,6 +97,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 ## Architecture
 
 ### Core Components
+
 - **Main Entry Point**: `main.py` with dependency injection and graceful shutdown
 - **Bot Client**: `bot/client.py` with self-bot command processing and rate limiting
 - **Command System**: `bot/commands.py` with 22 registered commands
@@ -98,6 +107,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 - **Image Generation**: `media/image_generator.py` with Arta API integration
 
 ### Configuration
+
 - Environment variables in `.env` file
 - Discord token and presence settings
 - AI model preferences and API keys
@@ -107,6 +117,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 - Admin user IDs for restricted commands
 
 ### Dependencies
+
 - `discord.py-self`: Discord self-bot framework
 - `requests`: HTTP client for API calls
 - `beautifulsoup4`: HTML parsing for web content
@@ -117,6 +128,7 @@ Jakey is a Discord self-bot with advanced AI integration, professional artistic 
 ## Development
 
 ### Running the Bot
+
 ```bash
 ./jakey.sh
 # or
@@ -124,6 +136,7 @@ python main.py
 ```
 
 ### Testing
+
 ```bash
 python -m tests.test_runner
 # or individual tests
@@ -131,6 +144,7 @@ python -m tests.test_<name>
 ```
 
 ### Development Commands
+
 - Create venv: `python -m venv venv`
 - Activate: `source venv/bin/activate`
 - Install: `pip install -r requirements.txt`
@@ -138,11 +152,13 @@ python -m tests.test_<name>
 ## Infrastructure
 
 ### Self-Hosted Services
+
 - **SearXNG**: Fast, reliable web search with multiple engine support (Google, Bing, DuckDuckGo, Brave)
 - **Local Caching**: Optimized search performance with fallback capabilities
 - **No External Dependencies**: Eliminates broken public service dependencies
 
 ### Error Handling
+
 - Comprehensive logging with colored output
 - Rate limiting with exponential backoff
 - NaN value checking for Discord latency
@@ -150,6 +166,7 @@ python -m tests.test_<name>
 - File locking for single-instance enforcement
 
 ## Security & Reliability
+
 - Admin command restrictions with configurable user IDs
 - Rate limiting to prevent API abuse
 - Secure configuration management

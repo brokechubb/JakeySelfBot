@@ -39,29 +39,29 @@ Enhanced database integration for comprehensive tracking:
 
 - **Function**: Check current tip.cc balances
 - **Features**:
-  - Real-time balance display
-  - USD value conversion
-  - Interactive button for detailed breakdown
-  - Multi-currency support
+    - Real-time balance display
+    - USD value conversion
+    - Interactive button for detailed breakdown
+    - Multi-currency support
 
 #### `%transactions [limit]`
 
 - **Function**: Show recent transaction history
 - **Parameters**: Optional limit (default: 10)
 - **Features**:
-  - Detailed transaction records
-  - Timestamp and value tracking
-  - USD equivalent values
-  - Category classification
+    - Detailed transaction records
+    - Timestamp and value tracking
+    - USD equivalent values
+    - Category classification
 
 #### `%tipstats`
 
 - **Function**: Show comprehensive tip statistics
 - **Features**:
-  - Tips sent and received tracking
-  - Airdrop winnings analysis
-  - Net profit/loss calculation
-  - Transaction volume statistics
+    - Tips sent and received tracking
+    - Airdrop winnings analysis
+    - Net profit/loss calculation
+    - Transaction volume statistics
 
 ### 4. Admin Commands
 
@@ -69,19 +69,19 @@ Enhanced database integration for comprehensive tracking:
 
 - **Function**: Send tips to users
 - **Parameters**:
-  - `recipient`: User mention or ID
-  - `amount`: Tip amount (supports $, numbers, decimals)
-  - `currency`: Currency code (DOGE, USD, BTC, etc.)
-  - `message`: Optional tip message
+    - `recipient`: User mention or ID
+    - `amount`: Tip amount (supports $, numbers, decimals)
+    - `currency`: Currency code (DOGE, USD, BTC, etc.)
+    - `message`: Optional tip message
 - **Features**: Proper command formatting and validation
 
 #### `%airdrop <amount> <currency> <duration>` (Admin Only)
 
 - **Function**: Create airdrops
 - **Parameters**:
-  - `amount`: Airdrop amount
-  - `currency`: Currency code
-  - `duration`: Duration (1m, 5m, 10m, etc.)
+    - `amount`: Airdrop amount
+    - `currency`: Currency code
+    - `duration`: Duration (1m, 5m, 10m, etc.)
 - **Features**: Automatic formatting and validation
 
 ## Command Examples

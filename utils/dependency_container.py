@@ -14,7 +14,13 @@ from data.database import db, DatabaseManager
 from tools.tool_manager import tool_manager, ToolManager
 from utils.tipcc_manager import TipCCManager
 from tools.mcp_memory_client import MCPMemoryClient
-from typing import Optional
+from typing import Optional, Any
+
+# Import memory backend
+try:
+    from memory import memory_backend
+except ImportError:
+    memory_backend = None
 
 
 @dataclass
@@ -26,6 +32,7 @@ class BotDependencies:
     discord_token: str
     tipcc_manager: Optional[TipCCManager] = None
     mcp_memory_client: Optional[MCPMemoryClient] = None
+    memory_backend: Optional[Any] = None
     command_prefix: str = '%'
 
     @classmethod
@@ -44,6 +51,7 @@ class BotDependencies:
             ai_client=pollinations_api,
             tipcc_manager=tipcc_manager,
             mcp_memory_client=mcp_memory_client,
+            memory_backend=memory_backend,
             discord_token=discord_token
         )
 
