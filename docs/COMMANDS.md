@@ -10,7 +10,7 @@ Jakey supports 35 commands across 7 categories:
 - **AI & Media Commands** (4): Image generation, audio, analysis, AI status
 - **Memory & User Commands** (2): User info, memory management
 - **Gambling & Utility Commands** (7): Gambling tools, utilities, airdrops
-- **Admin Commands** (8): Restricted to authorized users
+- **Admin Commands** (15): Restricted to authorized users
 - **tip.cc Commands** (3): Cryptocurrency tipping and balance tracking
 - **Role Management Commands** (4): Reaction roles and gender role configuration
 
@@ -66,21 +66,7 @@ Show or set the current AI model.
 
 **Note**: This command is restricted to admin users only.
 
-### %models
 
-List available AI models (summary).
-
-**Usage**: `%models`
-
-**Response**: Shows a summary of available text and image models.
-
-### %imagemodels
-
-List all available image AI models (49 artistic styles).
-
-**Usage**: `%imagemodels`
-
-**Response**: Shows all 49 available artistic styles for image generation.
 
 ### %time [timezone]
 
@@ -222,22 +208,6 @@ Generate random Keno numbers (3-10 numbers from 1-40) with 8x5 visual board.
 
 **Response**: Shows visual Keno board with selected numbers highlighted.
 
-### %airdropstatus
-
-Show current airdrop configuration and status.
-
-**Usage**: `%airdropstatus`
-
-**Response**: Shows airdrop settings, rates, server whitelist status, and current status.
-
-### %channelstats
-
-Show conversation statistics for the current channel.
-
-**Usage**: `%channelstats`
-
-**Response**: Shows message count, user activity, and other channel statistics.
-
 ### %ind_addr
 
 Generate a random Indian name and address.
@@ -248,17 +218,29 @@ Generate a random Indian name and address.
 
 ## tip.cc Commands
 
-### %bal / %bals
+### %confirm (Admin Only)
 
-Check tip.cc balances and click button on response. (Admin only)
+Manually check for and click Confirm button on tip.cc confirmation messages.
+
+**Usage**: `%confirm`
+
+**Response**: Searches for and interacts with tip.cc confirmation messages.
+
+**Note**: This command is restricted to admin users only.
+
+### %bal / %bals (Admin Only)
+
+Check tip.cc balances and click button on response.
 
 **Usage**: `%bal` or `%bals`
 
 **Response**: Shows balance information with interactive button for detailed breakdown.
 
-### %transactions [limit]
+**Note**: This command is restricted to admin users only.
 
-Show recent tip.cc transaction history. (Admin only)
+### %transactions [limit] (Admin Only)
+
+Show recent tip.cc transaction history.
 
 **Usage**: `%transactions [limit]`
 
@@ -269,13 +251,57 @@ Show recent tip.cc transaction history. (Admin only)
 
 **Response**: Shows recent transaction history with timestamps and values.
 
-### %tipstats
+**Note**: This command is restricted to admin users only.
 
-Show tip.cc statistics and earnings. (Admin only)
+### %tipstats (Admin Only)
+
+Show tip.cc statistics and earnings.
 
 **Usage**: `%tipstats`
 
 **Response**: Shows comprehensive statistics including tips sent/received, airdrop winnings, and net profit.
+
+**Note**: This command is restricted to admin users only.
+
+### %airdropstatus (Admin Only)
+
+Show current airdrop configuration and status.
+
+**Usage**: `%airdropstatus`
+
+**Response**: Shows airdrop settings, rates, server whitelist status, and current status.
+
+**Note**: This command is restricted to admin users only.
+
+### %tip <recipient> <amount> <currency> [message] (Admin Only)
+
+Send a tip to a user using tip.cc.
+
+**Usage**: `%tip <recipient> <amount> <currency> [message]`
+
+**Examples**:
+
+- `%tip @user 100 DOGE`
+- `%tip @user 5 USD Thanks for the help`
+
+**Response**: Sends properly formatted tip command to tip.cc bot.
+
+**Note**: This command is restricted to admin users only.
+
+### %airdrop <amount> <currency> <duration> (Admin Only)
+
+Create an airdrop using tip.cc.
+
+**Usage**: `%airdrop <amount> <currency> <duration>`
+
+**Examples**:
+
+- `%airdrop 1000 DOGE 5m`
+- `%airdrop 10 USD 10m`
+
+**Response**: Creates airdrop with specified parameters.
+
+**Note**: This command is restricted to admin users only.
 
 ## Admin Commands
 
@@ -292,7 +318,7 @@ Get information about a user.
 
 **Note**: This command is restricted to admin users only.
 
-### %clearhistory [user] (Admin Only)
+### %clearhistory [user]
 
 Clear conversation history for a user.
 
@@ -316,6 +342,151 @@ Clear ALL conversation history for all users.
 Clear conversation history for the current channel.
 
 **Usage**: `%clearchannelhistory`
+
+**Note**: This command is restricted to admin users only.
+
+### %clearmemories (Admin Only)
+
+Clear all stored memories for the user.
+
+**Usage**: `%clearmemories`
+
+**Response**: Clears all memories associated with the user and confirms deletion.
+
+**Note**: This command is restricted to admin users only.
+
+### %memorystatus (Admin Only)
+
+Show memory statistics and system status.
+
+**Usage**: `%memorystatus`
+
+**Response**: Displays memory system configuration, user memory count, and system health status.
+
+**Note**: This command is restricted to admin users only.
+
+### %models (Admin Only)
+
+List all available AI models with enhanced information.
+
+**Usage**: `%models`
+
+**Response**: Shows all available text, image, and audio models with descriptions and usage instructions.
+
+**Note**: This command is restricted to admin users only.
+
+### %imagemodels (Admin Only)
+
+List all available image AI models (49 artistic styles).
+
+**Usage**: `%imagemodels`
+
+**Response**: Shows all 49 available artistic styles for image generation.
+
+**Note**: This command is restricted to admin users only.
+
+### %aistatus (Admin Only)
+
+Display the current status of AI systems and APIs.
+
+**Usage**: `%aistatus`
+
+**Response**: Shows status of Pollinations API, OpenRouter fallback, and other AI services.
+
+**Note**: This command is restricted to admin users only.
+
+### %channelstats (Admin Only)
+
+Show conversation statistics for the current channel.
+
+**Usage**: `%channelstats`
+
+**Response**: Shows message count, user activity, and other channel statistics.
+
+**Note**: This command is restricted to admin users only.
+
+### %show_gender_roles (Admin Only)
+
+Display current gender role mappings.
+
+**Usage**: `%show_gender_roles`
+
+**Response**: Shows configured gender role mappings and detected roles.
+
+**Note**: This command is restricted to admin users only.
+
+### %list_keywords (Admin Only)
+
+List all configured keywords that Jakey responds to.
+
+**Usage**: `%list_keywords`
+
+**Response**: Shows all configured keywords in the system.
+
+**Note**: This command is restricted to admin users only.
+
+### %bal / %bals (Admin Only)
+
+Check tip.cc balances and click button on response.
+
+**Usage**: `%bal` or `%bals`
+
+**Response**: Shows balance information with interactive button for detailed breakdown.
+
+**Note**: This command is restricted to admin users only.
+
+### %confirm (Admin Only)
+
+Manually check for and click Confirm button on tip.cc confirmation messages.
+
+**Usage**: `%confirm`
+
+**Response**: Searches for and interacts with tip.cc confirmation messages.
+
+**Note**: This command is restricted to admin users only.
+
+### %transactions [limit] (Admin Only)
+
+Show recent tip.cc transaction history.
+
+**Usage**: `%transactions [limit]`
+
+**Examples**:
+
+- `%transactions` - Show last 10 transactions
+- `%transactions 25` - Show last 25 transactions
+
+**Response**: Shows recent transaction history with timestamps and values.
+
+**Note**: This command is restricted to admin users only.
+
+### %tipstats (Admin Only)
+
+Show tip.cc statistics and earnings.
+
+**Usage**: `%tipstats`
+
+**Response**: Shows comprehensive statistics including tips sent/received, airdrop winnings, and net profit.
+
+**Note**: This command is restricted to admin users only.
+
+### %airdropstatus (Admin Only)
+
+Show current airdrop configuration and status.
+
+**Usage**: `%airdropstatus`
+
+**Response**: Shows airdrop settings, rates, server whitelist status, and current status.
+
+**Note**: This command is restricted to admin users only.
+
+### %triviastats (Admin Only)
+
+Show trivia database statistics and health.
+
+**Usage**: `%triviastats`
+
+**Response**: Shows trivia database health, total questions, categories, and top categories.
 
 **Note**: This command is restricted to admin users only.
 
@@ -360,16 +531,6 @@ Set gender role mappings for automatic pronoun detection.
 - `%set_gender_roles male:123456789,female:987654321,neutral:111222333`
 
 **Response**: Updates gender role configuration for pronoun detection.
-
-**Note**: This command is restricted to admin users only.
-
-### %show_gender_roles (Admin Only)
-
-Display current gender role mappings.
-
-**Usage**: `%show_gender_roles`
-
-**Response**: Shows configured gender role mappings and detected roles.
 
 **Note**: This command is restricted to admin users only.
 
@@ -436,6 +597,20 @@ The following commands are restricted to admin users only:
 - `%clearhistory [user]` - Clear conversation history for a user
 - `%clearallhistory` - Clear ALL conversation history
 - `%clearchannelhistory` - Clear conversation history for current channel
+- `%clearmemories` - Clear all stored memories for the user
+- `%memorystatus` - Show memory statistics and system status
+- `%models` - List all available AI models
+- `%imagemodels` - List all available image AI models
+- `%aistatus` - Display the current status of AI systems and APIs
+- `%channelstats` - Show conversation statistics for the current channel
+- `%show_gender_roles` - Display current gender role mappings
+- `%list_keywords` - List all configured keywords
+- `%bal` / `%bals` - Check tip.cc balances and click button on response
+- `%confirm` - Manually check for and click Confirm button on tip.cc confirmation messages
+- `%transactions [limit]` - Show recent tip.cc transaction history
+- `%tipstats` - Show tip.cc statistics and earnings
+- `%airdropstatus` - Show current airdrop configuration and status
+- `%triviastats` - Show trivia database statistics and health
 - `%tip <recipient> <amount> <currency> [message]` - Send tips
 - `%airdrop <amount> <currency> <duration>` - Create airdrops
 
