@@ -415,7 +415,7 @@ class DiscordTools:
 
             logger.info(f"Attempting to send message to channel #{channel.name}")
             sent_message = await channel.send(content, **kwargs)
-            logger.info(f"Message sent successfully! ID: {sent_message.id}")
+            logger.info(f"Message sent (ID: {sent_message.id})")
 
             return {
                 "message": {
@@ -481,7 +481,7 @@ class DiscordTools:
             for attempt in range(max_retries):
                 try:
                     sent_message = await dm_channel.send(content)
-                    logger.info(f"DM sent successfully to user {user.id}, message ID: {sent_message.id}")
+                    logger.info(f"DM sent to {user.id} (ID: {sent_message.id})")
                     break
                 except discord.HTTPException as e:
                     if "Captcha required" in str(e) and attempt < max_retries - 1:

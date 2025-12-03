@@ -296,7 +296,7 @@ class MCPMemoryServer:
         await runner.setup()
         site = web.TCPSite(runner, host, port)
         await site.start()
-        logger.info("MCP Memory Server started successfully with authentication enabled")
+        logger.info("MCP Memory Server started (auth enabled)")
 
         try:
             # Keep server running

@@ -70,7 +70,12 @@ lock_file = None
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
     global running
-    logger.info("🛑 Received shutdown signal...")
+    try:
+        logger.info("🛑 Received shutdown signal...")
+    except Exception:
+        # Logger might be shutting down, ignore errors
+        pass
+    
     running = False
     # Release the lock file
     release_lock()
@@ -157,7 +162,7 @@ def main():
         from config import MESSAGE_QUEUE_ENABLED
         bot._message_queue_enabled = MESSAGE_QUEUE_ENABLED
 
-        logger.info("✅ Dependencies initialized successfully")
+        logger.info("Dependencies initialized")
     except Exception as e:
         logger.error(f"💀 Failed to initialize dependencies: {e}")
         release_lock()
@@ -179,7 +184,7 @@ def main():
             # Run the bot with improved error handling
             loop.run_until_complete(bot.start(DISCORD_TOKEN))
             reconnect_delay = 1.0  # Reset delay on successful connection
-            logger.info("✅ Connected to Discord successfully!")
+            logger.info("Connected to Discord")
 
             # Run the bot until it's disconnected
             loop.run_until_complete(bot.connect())

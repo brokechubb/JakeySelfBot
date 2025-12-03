@@ -281,9 +281,14 @@ The message relay feature now uses webhooks exclusively instead of direct channe
 #### MCP Memory Integration
 
 - **Server**: HTTP API on dynamically assigned port with health check endpoint
-- **Client**: Async HTTP client with dynamic port discovery
+- **Client**: Async HTTP client with dynamic port discovery and intelligent logging
 - **Fallback**: Graceful degradation to SQLite when MCP server unavailable
 - **Rate Limiting**: Built-in rate limiting for memory operations
+- **Smart Logging**: Rate-limited logging to prevent log spam
+  - Errors always logged at INFO level
+  - Routine operations (memory search/storage) logged at DEBUG level with 30s cooldown
+  - Operation summaries available for monitoring
+  - Verbose mode available via `MCP_VERBOSE_LOGGING=true` environment variable
 - **Configuration**: Controlled via `MCP_MEMORY_ENABLED` environment variable
 
 ### 🚀 Startup Process

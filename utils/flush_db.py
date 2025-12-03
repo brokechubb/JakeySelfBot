@@ -33,8 +33,8 @@ def main():
         # Flush the database
         db.flush_database()
         
-        logger.info("✅ Database flushed successfully!")
-        logger.info("🆕 New empty database created")
+        logger.info("Database flushed")
+        logger.info("New empty database created")
         
     except Exception as e:
         logger.error(f"❌ Error flushing database: {e}")

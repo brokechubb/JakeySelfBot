@@ -13,7 +13,7 @@ services:
       - SEARXNG_ENABLE_METRICS=false
       - SEARXNG_DEBUG=false
     volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml
+      - ./searxng/settings.yml:/etc/searxng/settings-use.yml:ro
     networks:
       - searxng_net
 

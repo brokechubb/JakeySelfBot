@@ -114,7 +114,7 @@ def verify_migration():
         logger.info(f"  Without channel_id: {without_channel_count}")
 
         if without_channel_count == 0:
-            logger.info("✅ Migration successful! All conversations have channel_id.")
+            logger.info("Migration successful - all conversations have channel_id")
         else:
             logger.warning(f"⚠️  Migration incomplete! {without_channel_count} conversations still lack channel_id.")
 

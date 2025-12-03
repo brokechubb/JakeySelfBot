@@ -173,44 +173,42 @@ class SimpleAIProviderManager:
         last_error = None
         for attempt, provider in enumerate(providers_to_try):
             try:
-                # Check provider health
-                health = await self.check_provider_health(provider)
-                if not health.healthy:
-                    logger.warning(
-                        f"Provider {provider} is unhealthy: {health.error_message}"
-                    )
-                    last_error = health.error_message
-                    continue
+                # Skip health check completely for fastest response - let API call failures trigger failover
+                # This eliminates the 5-10 second health check overhead on every request
 
-                # Make request
+                # Make request directly without executor overhead
+                request_start = time.time()
                 if provider == "pollinations":
-                    loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: self.pollinations_api.generate_text(
-                            messages=messages,
-                            model=model,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                            tools=tools,
-                            tool_choice=tool_choice,
-                            **kwargs,
-                        ),
+                    logger.debug(
+                        f"🚀 Making direct Pollinations API call (attempt {attempt + 1})"
+                    )
+                    result = await asyncio.to_thread(
+                        self.pollinations_api.generate_text,
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        **kwargs,
                     )
                 else:  # openrouter
-                    loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(
-                        None,
-                        lambda: self.openrouter_api.generate_text(
-                            messages=messages,
-                            model=model,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                            tools=tools,
-                            tool_choice=tool_choice,
-                            **kwargs,
-                        ),
+                    logger.debug(
+                        f"🚀 Making direct OpenRouter API call (attempt {attempt + 1})"
                     )
+                    result = await asyncio.to_thread(
+                        self.openrouter_api.generate_text,
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        **kwargs,
+                    )
+
+                request_time = time.time() - request_start
+                logger.debug(f"⏱️ {provider} API call completed in {request_time:.2f}s")
 
                 # Check for errors in response
                 if isinstance(result, dict) and "error" in result:
@@ -225,14 +223,9 @@ class SimpleAIProviderManager:
 
                 if attempt > 0:
                     self.stats["failover_count"] += 1
-                    logger.info(
-                        f"Failover: Used {provider} after {attempt} failed attempts"
-                    )
+                    logger.info(f"Failover: {provider} after {attempt} attempts")
 
-                logger.info(
-                    f"Text generation successful using {provider} "
-                    f"(response time: {response_time:.2f}s)"
-                )
+                logger.info(f"Generated text via {provider} ({response_time:.2f}s)")
 
                 return result
 
@@ -299,10 +292,7 @@ class SimpleAIProviderManager:
             self.stats["successful_requests"] += 1
             self.stats["provider_usage"]["pollinations"] += 1
 
-            logger.info(
-                f"Image generation successful using pollinations "
-                f"(response time: {response_time:.2f}s)"
-            )
+            logger.info(f"Generated image via pollinations ({response_time:.2f}s)")
 
             return result
 
@@ -397,9 +387,7 @@ class SimpleAIProviderManager:
             "user_preference": user_preference,
         }
 
-        logger.info(
-            f"Saved model state: {original_model}@{original_provider} -> {fallback_model}@{fallback_provider}"
-        )
+        logger.info(f"Saved model state: {original_model}@{original_provider} -> {fallback_model}@{fallback_provider}")
 
     def should_restore_original_model(self, provider_name: str) -> bool:
         """
@@ -444,12 +432,14 @@ class SimpleAIProviderManager:
             return None
 
         state = self.original_model_state
+        if not state:
+            return None
 
         # Determine which model to restore
-        if state["user_preference"]:
+        if state.get("user_preference"):
             # User has a preferred model
             model_to_restore = state["user_preference"]
-        elif state["original_model"]:
+        elif state.get("original_model"):
             # Use the original model that was being used
             model_to_restore = state["original_model"]
         else:
@@ -468,15 +458,13 @@ class SimpleAIProviderManager:
             "provider": provider_name,
             "restored_from_failover": True,
             "previous_state": {
-                "fallback_model": state["fallback_model"],
-                "fallback_provider": state["fallback_provider"],
-                "failover_timestamp": state["timestamp"],
+                "fallback_model": state.get("fallback_model"),
+                "fallback_provider": state.get("fallback_provider"),
+                "failover_timestamp": state.get("timestamp"),
             },
         }
 
-        logger.info(
-            f"Restoring model configuration: {model_to_restore}@{provider_name}"
-        )
+        logger.info(f"Restoring model: {model_to_restore}@{provider_name}")
         return config
 
     def _is_model_available(self, model: str, provider: str) -> bool:
@@ -529,10 +517,7 @@ class SimpleAIProviderManager:
     def clear_model_state(self):
         """Clear the current model state (e.g., after successful restoration)."""
         if self.original_model_state:
-            logger.info(
-                f"Cleared model state: {self.original_model_state['original_model']}@"
-                f"{self.original_model_state['original_provider']}"
-            )
+            logger.info(f"Cleared model state: {self.original_model_state['original_model']}@{self.original_model_state['original_provider']}")
             self.original_model_state = None
 
     def update_current_model(self, model: str, provider: str):

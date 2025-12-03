@@ -48,7 +48,7 @@ Holy shit, this project is my baby - a wild ride through full-stack development 
 - **Gambling Tools**: Keno generator, bonus schedules, financial calcs
 - **Memory System**: Remembers your shit so conversations make sense
 
-**Bottom line**: This started as a learning project and became a beast. Jakey proves you can build enterprise-level shit while keeping it fun and degenerate. Everything is rigged, but at least the code works! 🎰💩
+**Bottom line**: Jakey proves enterprise-level shit can be built while keeping it innovative and fun. Everything is rigged, but the code works! 🎰💩
 
 ## 🎯 What Jakey Can Do For You
 
@@ -75,15 +75,15 @@ Jakey isn't just another Discord bot - he's your degenerate research assistant, 
 - **Professional Art Generation**: Create stunning images in 49 artistic styles (Van Gogh, anime, fantasy, etc.)
 - **Gambling Tools**: Keno number generation, bonus schedule lookups, betting calculators
 - **Time & Date**: Global timezone support and scheduling
-- **Random Generators**: Indian names/addresses, conversation starters, and more
-- **Memory System**: Remembers your preferences, favorite colors, and personal details
+- **Random Generators**: Fictional Indian names/addresses, conversation starters, and more
+- **Memory System**: Remembers your preferences, favorite colors, and personal details from conversation
 
 ### 🤖 **AI Assistant Features**
 
-- **Contextual Conversations**: Remembers chat history for coherent discussions
+- **Contextual Conversations**: Remembers chat history persistently for coherent discussions
 - **Tool Integration**: Uses specialized tools for accurate answers (calculations, web search, crypto data)
 - **Multi-Modal**: Text, image generation, audio synthesis, and analysis
-- **Personality-Driven**: Cynical wit with a gambling degenerate persona
+- **Personality-Driven**: Cynical wit with an over the top gambling degenerate persona
 - **Error Recovery**: Graceful handling of failures with helpful alternatives
 
 ### 🛠️ **Server Management**
@@ -103,7 +103,7 @@ Jakey isn't just another Discord bot - he's your degenerate research assistant, 
 - **Uncensored AI**: Jakey uses uncensored AI models that can generate explicit, offensive, or controversial content
 - **No Content Filtering**: Unlike mainstream AI services, Jakey has minimal content restrictions
 - **User Responsibility**: All generated content is the responsibility of the user - use discretion
-- **Degenerate Personality**: Jake's responses reflect his cynical, gambling-obsessed persona
+- **Degenerate Personality**: Jake's responses are offensive and reflect his cynical, gambling-obsessed persona
 
 ### 🚨 Self-Bot Risks & Legal Notice
 
@@ -415,6 +415,12 @@ This project is licensed under the GNU General Public License v3.0. See the [LIC
 - ✅ **Community**: Contributions and improvements are welcome
 
 For more information about GPLv3, visit [https://www.gnu.org/licenses/gpl-3.0](https://www.gnu.org/licenses/gpl-3.0)
+
+---
+
+## 🙏 Acknowledgment
+
+This project takes inspiration from the original [JakeyBot](https://github.com/zavocc/JakeyBot) by [zavocc](https://github.com/zavocc). While this implementation is built from the ground up with completely different architecture and features, we acknowledge that the name "Jakey" and the general concept of an AI-powered Discord assistant originated from that project. The Jakey Self-Bot project has evolved into a distinct implementation with self-botting capabilities, MCP memory systems, and advanced tool integration that differ significantly from the original.
 
 ---
 

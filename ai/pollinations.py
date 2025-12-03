@@ -1,27 +1,29 @@
-import requests
 import json
-import urllib.parse
-import time
-import threading
-import random
-from typing import List, Dict, Any, Optional, Union
-from config import (
-    POLLINATIONS_TEXT_API,
-    POLLINATIONS_IMAGE_API,
-    POLLINATIONS_API_TOKEN,
-    DEFAULT_MODEL,
-    TEXT_API_RATE_LIMIT,
-    IMAGE_API_RATE_LIMIT,
-    POLLINATIONS_TEXT_TIMEOUT,
-    POLLINATIONS_IMAGE_TIMEOUT,
-    POLLINATIONS_HEALTH_TIMEOUT,
-    TIMEOUT_MONITORING_ENABLED,
-    TIMEOUT_HISTORY_SIZE,
-    DYNAMIC_TIMEOUT_ENABLED,
-    DYNAMIC_TIMEOUT_MIN,
-    DYNAMIC_TIMEOUT_MAX,
-)
 import logging
+import random
+import threading
+import time
+import urllib.parse
+from typing import Any, Dict, List, Optional, Union
+
+import requests
+
+from config import (
+    DEFAULT_MODEL,
+    DYNAMIC_TIMEOUT_ENABLED,
+    DYNAMIC_TIMEOUT_MAX,
+    DYNAMIC_TIMEOUT_MIN,
+    IMAGE_API_RATE_LIMIT,
+    POLLINATIONS_API_TOKEN,
+    POLLINATIONS_HEALTH_TIMEOUT,
+    POLLINATIONS_IMAGE_API,
+    POLLINATIONS_IMAGE_TIMEOUT,
+    POLLINATIONS_TEXT_API,
+    POLLINATIONS_TEXT_TIMEOUT,
+    TEXT_API_RATE_LIMIT,
+    TIMEOUT_HISTORY_SIZE,
+    TIMEOUT_MONITORING_ENABLED,
+)
 
 # Configure logging
 from utils.logging_config import get_logger
@@ -47,12 +49,12 @@ class PollinationsAPI:
         self.text_timeout = POLLINATIONS_TEXT_TIMEOUT
         self.image_timeout = POLLINATIONS_IMAGE_TIMEOUT
         self.health_timeout = POLLINATIONS_HEALTH_TIMEOUT
-        
+
         # Dynamic timeout adjustment
         self.dynamic_timeout_enabled = DYNAMIC_TIMEOUT_ENABLED
         self.dynamic_timeout_min = DYNAMIC_TIMEOUT_MIN
         self.dynamic_timeout_max = DYNAMIC_TIMEOUT_MAX
-        
+
         # Performance monitoring
         self.timeout_monitoring_enabled = TIMEOUT_MONITORING_ENABLED
         self.timeout_history = []
@@ -92,44 +94,52 @@ class PollinationsAPI:
         """Calculate dynamic timeout based on historical performance"""
         if not self.dynamic_timeout_enabled or not self.response_times:
             return base_timeout
-        
+
         with self.timeout_history_lock:
             if len(self.response_times) < 5:  # Need at least 5 samples
                 return base_timeout
-            
+
             # Calculate average response time and standard deviation
             avg_response_time = sum(self.response_times) / len(self.response_times)
-            variance = sum((x - avg_response_time) ** 2 for x in self.response_times) / len(self.response_times)
-            std_dev = variance ** 0.5
-            
+            variance = sum(
+                (x - avg_response_time) ** 2 for x in self.response_times
+            ) / len(self.response_times)
+            std_dev = variance**0.5
+
             # Set timeout to average + 2 standard deviations, within bounds
             dynamic_timeout = avg_response_time + (2 * std_dev)
-            dynamic_timeout = max(self.dynamic_timeout_min, min(dynamic_timeout, self.dynamic_timeout_max))
-            
-            logger.debug(f"Dynamic timeout: {dynamic_timeout:.2f}s (avg: {avg_response_time:.2f}s, std: {std_dev:.2f}s)")
+            dynamic_timeout = max(
+                self.dynamic_timeout_min, min(dynamic_timeout, self.dynamic_timeout_max)
+            )
+
+            logger.debug(
+                f"Dynamic timeout: {dynamic_timeout:.2f}s (avg: {avg_response_time:.2f}s, std: {std_dev:.2f}s)"
+            )
             return dynamic_timeout
 
     def _record_response_time(self, response_time: float, success: bool):
         """Record response time for performance monitoring and dynamic adjustment"""
         if not self.timeout_monitoring_enabled:
             return
-        
+
         with self.timeout_history_lock:
             # Record response time
             self.response_times.append(response_time)
-            
+
             # Keep only recent history
             if len(self.response_times) > TIMEOUT_HISTORY_SIZE:
                 self.response_times = self.response_times[-TIMEOUT_HISTORY_SIZE:]
-            
+
             # Record timeout occurrence
             if not success:
-                self.timeout_history.append({
-                    'timestamp': time.time(),
-                    'response_time': response_time,
-                    'success': success
-                })
-                
+                self.timeout_history.append(
+                    {
+                        "timestamp": time.time(),
+                        "response_time": response_time,
+                        "success": success,
+                    }
+                )
+
                 # Keep timeout history manageable
                 if len(self.timeout_history) > TIMEOUT_HISTORY_SIZE:
                     self.timeout_history = self.timeout_history[-TIMEOUT_HISTORY_SIZE:]
@@ -138,16 +148,22 @@ class PollinationsAPI:
         """Get timeout performance statistics"""
         if not self.timeout_monitoring_enabled:
             return {"monitoring_enabled": False}
-        
+
         with self.timeout_history_lock:
             total_requests = len(self.response_times)
-            timeout_count = len([h for h in self.timeout_history if not h['success']])
-            timeout_rate = (timeout_count / total_requests * 100) if total_requests > 0 else 0
-            
-            avg_response_time = (sum(self.response_times) / len(self.response_times)) if self.response_times else 0
+            timeout_count = len([h for h in self.timeout_history if not h["success"]])
+            timeout_rate = (
+                (timeout_count / total_requests * 100) if total_requests > 0 else 0
+            )
+
+            avg_response_time = (
+                (sum(self.response_times) / len(self.response_times))
+                if self.response_times
+                else 0
+            )
             max_response_time = max(self.response_times) if self.response_times else 0
             min_response_time = min(self.response_times) if self.response_times else 0
-            
+
             return {
                 "monitoring_enabled": True,
                 "total_requests": total_requests,
@@ -159,7 +175,7 @@ class PollinationsAPI:
                 "current_text_timeout": self.text_timeout,
                 "dynamic_timeout_enabled": self.dynamic_timeout_enabled,
                 "dynamic_timeout_min": self.dynamic_timeout_min,
-                "dynamic_timeout_max": self.dynamic_timeout_max
+                "dynamic_timeout_max": self.dynamic_timeout_max,
             }
 
     def generate_text(
@@ -211,56 +227,70 @@ class PollinationsAPI:
                     )
 
             cleaned_messages.append(cleaned_msg)
-        
+
         # Validate role ordering to prevent API errors
         # OpenAI API requires: system (optional, first) -> user/assistant alternating -> tool (immediately after assistant with tool_calls)
         system_seen = False
         last_role = None
-        
+
         for i, msg in enumerate(cleaned_messages):
             role = msg.get("role")
-            
+
             # System message must be first if present
             if role == "system":
                 if i > 0:
-                    logger.warning(f"System message found at position {i} (not first). Removing invalid system message.")
+                    logger.warning(
+                        f"System message found at position {i} (not first). Removing invalid system message."
+                    )
                     cleaned_messages[i] = None  # Mark for removal
                     continue
                 system_seen = True
-            
+
             # Tool messages must come after assistant messages with tool_calls
             # They can be part of a sequence of tool messages after one assistant message
             elif role == "tool":
-                if i == 0 or cleaned_messages[i-1] is None:
-                    logger.warning(f"Tool message at position {i} without preceding message. Removing.")
+                if i == 0 or cleaned_messages[i - 1] is None:
+                    logger.warning(
+                        f"Tool message at position {i} without preceding message. Removing."
+                    )
                     cleaned_messages[i] = None  # Mark for removal
                     continue
-                
+
                 # Find the most recent non-tool message before this one
                 j = i - 1
-                while j >= 0 and cleaned_messages[j] is not None and cleaned_messages[j].get("role") == "tool":
+                while (
+                    j >= 0
+                    and cleaned_messages[j] is not None
+                    and cleaned_messages[j].get("role") == "tool"
+                ):
                     j -= 1
-                
+
                 if j < 0 or cleaned_messages[j] is None:
-                    logger.warning(f"Tool message at position {i} without preceding assistant message. Removing.")
+                    logger.warning(
+                        f"Tool message at position {i} without preceding assistant message. Removing."
+                    )
                     cleaned_messages[i] = None  # Mark for removal
                     continue
-                
+
                 prev_role = cleaned_messages[j].get("role")
                 if prev_role != "assistant":
-                    logger.warning(f"Tool message at position {i} after {prev_role} role (should be assistant). Removing.")
+                    logger.warning(
+                        f"Tool message at position {i} after {prev_role} role (should be assistant). Removing."
+                    )
                     cleaned_messages[i] = None  # Mark for removal
                     continue
-                
+
                 # Check if the assistant message has tool_calls
                 prev_tool_calls = cleaned_messages[j].get("tool_calls")
                 if not prev_tool_calls:
-                    logger.warning(f"Tool message at position {i} but previous assistant has no tool_calls. Removing.")
+                    logger.warning(
+                        f"Tool message at position {i} but previous assistant has no tool_calls. Removing."
+                    )
                     cleaned_messages[i] = None  # Mark for removal
                     continue
-            
+
             last_role = role
-        
+
         # Remove None messages
         cleaned_messages = [msg for msg in cleaned_messages if msg is not None]
 
@@ -271,10 +301,10 @@ class PollinationsAPI:
         if model and "openai" not in model.lower():
             payload["temperature"] = temperature
             payload["max_tokens"] = max_tokens
-        
+
         # Note: Pollinations/Azure OpenAI does NOT support these parameters:
         # - top_p
-        # - frequency_penalty  
+        # - frequency_penalty
         # - presence_penalty
         # - stop
         # So we exclude them to avoid "unsupported parameter" errors
@@ -312,14 +342,14 @@ class PollinationsAPI:
 
             # Get dynamic timeout for this request
             request_timeout = self._get_dynamic_timeout(self.text_timeout)
-            
+
             # Add improved retry logic for temporary network issues with exponential backoff
-            max_retries = 1  # Reduced for faster fallback to OpenRouter
+            max_retries = 1  # Allow 1 attempt before fallback, with fast timeout
             base_delay = 2  # Base delay in seconds
 
             response = None  # Initialize response variable
             request_start_time = time.time()
-            
+
             for attempt in range(max_retries):
                 try:
                     # Only log retry attempts, not the initial try
@@ -328,7 +358,10 @@ class PollinationsAPI:
                             f"Retrying Pollinations API (attempt {attempt + 1}/{max_retries})"
                         )
                     response = requests.post(
-                        self.text_api_url, headers=headers, json=payload, timeout=request_timeout
+                        self.text_api_url,
+                        headers=headers,
+                        json=payload,
+                        timeout=request_timeout,
                     )
 
                     # Handle specific HTTP status codes
@@ -345,7 +378,9 @@ class PollinationsAPI:
                             time.sleep(delay)
                             continue
                         else:
-                            logger.error("🚨 Pollinations service appears to be experiencing an outage after all retries")
+                            logger.error(
+                                "🚨 Pollinations service appears to be experiencing an outage after all retries"
+                            )
                     elif response.status_code == 429:
                         logger.warning(f"🔥 Rate limit hit from Pollinations API (429)")
                         # Add a cooldown delay before returning error
@@ -366,20 +401,26 @@ class PollinationsAPI:
                         logger.info(
                             f"✅ Pollinations API call successful on attempt {attempt + 1}"
                         )
-                    logger.debug(f"Pollinations response time: {response_time:.2f}s (timeout: {request_timeout}s)")
+                    logger.debug(
+                        f"Pollinations response time: {response_time:.2f}s (timeout: {request_timeout}s)"
+                    )
                     return response.json()
 
                 except requests.exceptions.Timeout:
                     response_time = time.time() - request_start_time
                     self._record_response_time(response_time, False)
-                    logger.warning(f"API timeout after {response_time:.2f}s (attempt {attempt + 1}/{max_retries}, timeout: {request_timeout}s)")
+                    logger.warning(
+                        f"API timeout after {response_time:.2f}s (attempt {attempt + 1}/{max_retries}, timeout: {request_timeout}s)"
+                    )
                     if attempt < max_retries - 1:
                         delay = base_delay * (2**attempt)
                         logger.info(f"Retrying in {delay} seconds...")
                         time.sleep(delay)
                         continue
                     else:
-                        return {"error": f"API timeout after {max_retries} attempts (timeout: {request_timeout}s)"}
+                        return {
+                            "error": f"API timeout after {max_retries} attempts (timeout: {request_timeout}s)"
+                        }
 
                 except requests.exceptions.ConnectionError:
                     logger.warning(
@@ -399,7 +440,7 @@ class PollinationsAPI:
                     if response is not None:
                         error_msg = f"HTTP {response.status_code}: {response.text}"
                         logger.error(f"HTTP Error: {error_msg}")
-                        
+
                         # Provide more specific error messages for common issues
                         if response.status_code == 502:
                             return {
@@ -490,7 +531,7 @@ class PollinationsAPI:
             # Generate random 6-digit seed
             params["seed"] = f"{random.randint(100000, 999999)}"
 
-        # Note: Removed quality, guidance_scale, steps, and token parameters 
+        # Note: Removed quality, guidance_scale, steps, and token parameters
         # to match the desired URL format exactly
 
         # Build the full URL
@@ -506,17 +547,37 @@ class PollinationsAPI:
         try:
             response = requests.get(url, headers=headers, timeout=self.health_timeout)
             if response.status_code == 200:
-                return {"healthy": True, "status": "ok", "response_time": response.elapsed.total_seconds()}
+                return {
+                    "healthy": True,
+                    "status": "ok",
+                    "response_time": response.elapsed.total_seconds(),
+                }
             elif response.status_code == 502:
-                return {"healthy": False, "status": "bad_gateway", "error": "Service is down"}
+                return {
+                    "healthy": False,
+                    "status": "bad_gateway",
+                    "error": "Service is down",
+                }
             elif response.status_code == 503:
-                return {"healthy": False, "status": "service_unavailable", "error": "Service temporarily unavailable"}
+                return {
+                    "healthy": False,
+                    "status": "service_unavailable",
+                    "error": "Service temporarily unavailable",
+                }
             else:
-                return {"healthy": False, "status": f"http_{response.status_code}", "error": f"HTTP {response.status_code}"}
+                return {
+                    "healthy": False,
+                    "status": f"http_{response.status_code}",
+                    "error": f"HTTP {response.status_code}",
+                }
         except requests.exceptions.Timeout:
             return {"healthy": False, "status": "timeout", "error": "Request timeout"}
         except requests.exceptions.ConnectionError:
-            return {"healthy": False, "status": "connection_error", "error": "Cannot connect to service"}
+            return {
+                "healthy": False,
+                "status": "connection_error",
+                "error": "Cannot connect to service",
+            }
         except requests.exceptions.RequestException as e:
             return {"healthy": False, "status": "request_error", "error": str(e)}
 
@@ -529,7 +590,11 @@ class PollinationsAPI:
             response.raise_for_status()
             models_data = response.json()
             # Extract model names from the list of dictionaries
-            return [model.get("name", "") for model in models_data if isinstance(model, dict) and "name" in model]
+            return [
+                model.get("name", "")
+                for model in models_data
+                if isinstance(model, dict) and "name" in model
+            ]
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching text models: {e}")
             return []
@@ -543,7 +608,11 @@ class PollinationsAPI:
             response.raise_for_status()
             models_data = response.json()
             # Extract model names from the list of dictionaries
-            return [model.get("name", "") for model in models_data if isinstance(model, dict) and "name" in model]
+            return [
+                model.get("name", "")
+                for model in models_data
+                if isinstance(model, dict) and "name" in model
+            ]
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching image models: {e}")
             return []
@@ -606,7 +675,10 @@ class PollinationsAPI:
                 }
 
             response = requests.post(
-                self.text_api_url, headers=headers, json=payload, timeout=self.text_timeout
+                self.text_api_url,
+                headers=headers,
+                json=payload,
+                timeout=self.text_timeout,
             )
             response.raise_for_status()
 

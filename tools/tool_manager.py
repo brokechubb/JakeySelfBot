@@ -1222,8 +1222,11 @@ class ToolManager:
                         # Parse HTML content
                         soup = BeautifulSoup(response.content, "html.parser")
 
-                        # Extract results from search result divs
-                        result_divs = soup.find_all("div", class_="result")
+                        # Extract results from search result articles (new SearXNG) or divs (old SearXNG)
+                        result_divs = soup.find_all("article", class_="result")
+                        if not result_divs:
+                            # Fallback to div elements for older SearXNG versions
+                            result_divs = soup.find_all("div", class_="result")
                         if not result_divs:
                             # Try alternative class names
                             result_divs = soup.find_all(
@@ -1234,26 +1237,29 @@ class ToolManager:
                             results = []
                             for result_div in result_divs[:7]:  # Limit to top 7 results
                                 try:
-                                    # Extract title
+                                    # Extract title (updated for article structure)
                                     title_elem = (
                                         result_div.find("h3")
                                         or result_div.find("h4")
-                                        or result_div.find("a")
                                     )
-                                    title = (
-                                        title_elem.get_text(strip=True)
-                                        if title_elem
-                                        else "No title"
-                                    )
+                                    if title_elem:
+                                        title_link = title_elem.find("a")
+                                        title = (
+                                            title_link.get_text(strip=True)
+                                            if title_link
+                                            else title_elem.get_text(strip=True)
+                                        )
+                                    else:
+                                        title = "No title"
 
                                     # Extract URL
                                     url_elem = result_div.find("a", href=True)
                                     url = url_elem["href"] if url_elem else ""
 
-                                    # Extract content/description
-                                    content_elem = result_div.find(
-                                        "p"
-                                    ) or result_div.find("span", class_="content")
+                                    # Extract content/description (updated for article structure)
+                                    content_elem = result_div.find("p", class_="content")
+                                    if not content_elem:
+                                        content_elem = result_div.find("p")
                                     content = (
                                         content_elem.get_text(strip=True)
                                         if content_elem
@@ -1294,21 +1300,12 @@ class ToolManager:
         if not self._validate_search_query(query):
             return "Invalid search query. Please check your input and try again."
 
-        # List of public SearXNG instances (fallback mechanism)
+        # List of SearXNG instances (local first, then public fallback)
         public_instances = [
+            "http://localhost:8086",  # Local SearXNG instance
             "https://searx.be",
             "https://metacat.online",
             "https://nyc1.sx.ggtyler.dev",
-            "https://ooglester.com",
-            "https://search.080609.xyz",
-            "https://search.canine.tools",
-            "https://search.catboy.house",
-            "https://search.citw.lgbt",
-            "https://search.einfachzocken.eu",
-            "https://search.federicociro.com",
-            "https://search.hbubli.cc",
-            "https://search.im-in.space",
-            "https://search.indst.eu",
         ]
 
         # Shuffle the instances for better distribution

@@ -306,7 +306,7 @@ class DatabaseManager:
 
         cursor.execute(
             """
-            SELECT message_history, created_at FROM conversations
+            SELECT message_history, created_at, channel_id FROM conversations
             WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT ?
@@ -317,7 +317,7 @@ class DatabaseManager:
         rows = cursor.fetchall()
         conn.close()
 
-        return [{"messages": json.loads(row[0]), "timestamp": row[1]} for row in rows]
+        return [{"messages": json.loads(row[0]), "timestamp": row[1], "channel_id": row[2]} for row in rows]
 
     def get_recent_channel_conversations(
         self, channel_id: str, limit: int = None
@@ -485,7 +485,7 @@ class DatabaseManager:
         # Reinitialize the database with empty tables
         self.init_database()
 
-        logger.info("Database flushed and recreated successfully")
+        logger.info("Database flushed and recreated")
 
     # Async database operations
     async def aget_user(self, user_id: str) -> Optional[Dict[str, Any]]:

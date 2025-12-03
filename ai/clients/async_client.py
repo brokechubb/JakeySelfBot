@@ -165,7 +165,7 @@ class AsyncPollinationsClient:
 
                     # Only log success on retry, not on first attempt
                     if attempt > 0:
-                        logger.info(f"✅ Pollinations API call successful on attempt {attempt + 1}")
+                        logger.info(f"Pollinations success on attempt {attempt + 1}")
                     
                     response_data = response.json()
                     return TextGenerationResponse(

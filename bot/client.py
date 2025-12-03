@@ -18,12 +18,12 @@ from discord import DMChannel, GroupChannel, TextChannel, Thread
 from discord.ext import commands
 from discord.ext.commands.view import StringView
 
+from ai.anti_repetition_integrator import anti_repetition_integrator
 from ai.openrouter import openrouter_api
 from ai.pollinations import pollinations_api
 
 # Import response uniqueness system
 from ai.response_uniqueness import response_uniqueness
-from ai.anti_repetition_integrator import anti_repetition_integrator
 
 # Import admin check function
 from bot.commands import is_admin
@@ -85,22 +85,27 @@ from config import (
     AIRDROP_DISABLE_MATHDROP,
     AIRDROP_DISABLE_PHRASEDROP,
     AIRDROP_DISABLE_REDPACKET,
-    AIRDROP_DISABLE_TRIVIADROP,
     AIRDROP_IGNORE_DROPS_UNDER,
     AIRDROP_IGNORE_TIME_UNDER,
     AIRDROP_IGNORE_USERS,
-    AIRDROP_SERVER_WHITELIST,
     AIRDROP_RANGE_DELAY,
+    AIRDROP_SERVER_WHITELIST,
     AIRDROP_SMART_DELAY,
+    AUTO_MEMORY_CLEANUP_ENABLED,
+    AUTO_MEMORY_EXTRACTION_CONFIDENCE_THRESHOLD,
+    AUTO_MEMORY_EXTRACTION_ENABLED,
+    AUTO_MEMORY_MAX_AGE_DAYS,
     CHANNEL_CONTEXT_MESSAGE_LIMIT,
     CHANNEL_CONTEXT_MINUTES,
     CONVERSATION_HISTORY_LIMIT,
     DISCORD_TOKEN,
     GENDER_ROLES_GUILD_ID,
-    MAX_CONVERSATION_TOKENS,
+    GUILD_BLACKLIST,
+    IMAGE_API_RATE_LIMIT,
     RATE_LIMIT_COOLDOWN,
     RELAY_MENTION_ROLE_MAPPINGS,
     SYSTEM_PROMPT,
+    TRIVIA_RANDOM_FALLBACK,
     USE_WEBHOOK_RELAY,
     USER_RATE_LIMIT,
     WEBHOOK_EXCLUDE_IDS,
@@ -128,18 +133,10 @@ class JakeyConstants:
     RESPONSE_COOLDOWN_SECONDS = 3
     RATE_LIMIT_WINDOW = 60
     USER_MEMORY_LIMIT_DAYS = 7
-    CONVERSATION_HISTORY_LIMIT = (
-        CONVERSATION_HISTORY_LIMIT  # Number of previous conversations to include
-    )
-    MAX_CONVERSATION_TOKENS = (
-        MAX_CONVERSATION_TOKENS  # Maximum tokens for conversation context
-    )
-    CHANNEL_CONTEXT_MINUTES = (
-        CHANNEL_CONTEXT_MINUTES  # Minutes of channel context to include
-    )
-    CHANNEL_CONTEXT_MESSAGE_LIMIT = (
-        CHANNEL_CONTEXT_MESSAGE_LIMIT  # Maximum messages in channel context
-    )
+    CONVERSATION_HISTORY_LIMIT = 3  # Number of previous conversations to include
+    MAX_CONVERSATION_TOKENS = 1000  # Maximum tokens for conversation context
+    CHANNEL_CONTEXT_MINUTES = 30  # Minutes of channel context to include
+    CHANNEL_CONTEXT_MESSAGE_LIMIT = 20  # Number of channel messages to include
 
 
 class JakeyBot(commands.Bot):
@@ -515,7 +512,8 @@ class JakeyBot(commands.Bot):
         )
         logger.info(f"Available commands: {list(self.all_commands.keys())}")
 
-        # Cleanup scheduler removed - method was not implemented
+        # Set up periodic memory cleanup
+        await self.setup_periodic_memory_cleanup()
 
         # Start the reminder background task
         asyncio.create_task(self._check_due_reminders())
@@ -791,29 +789,51 @@ class JakeyBot(commands.Bot):
         try:
             # Import here to avoid circular imports
             from ai.ai_provider_manager import SimpleAIProviderManager
-            
+
             # Initialize AI provider manager if not already done
-            if not hasattr(self, '_ai_manager'):
+            if not hasattr(self, "_ai_manager"):
                 self._ai_manager = SimpleAIProviderManager()
-            
+
             # Prepare the message for AI processing
             user_content = message.content.strip()
             if not user_content:
                 return  # Don't respond to empty messages
-            
+
+            # Get memory context for the user
+            memory_context = ""
+            try:
+                from tools.memory_search import memory_search_tool
+
+                memory_context = (
+                    await memory_search_tool.get_memory_context_for_message(
+                        str(message.author.id), message.content
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Failed to get memory context: {e}")
+
+            # Create system message - combine system prompt and memory context
+            system_content = SYSTEM_PROMPT
+            if memory_context:
+                system_content += f"\n\nUser Context (remembered from previous conversations):\n{memory_context}\n\nUse this context to personalized your response, but don't explicitly mention that you're remembering things."
+
             messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content}
+                {"role": "system", "content": system_content},
             ]
-            
+
+            messages.append({"role": "user", "content": user_content})
+
             # Add conversation context if available
             try:
                 from data.database import db
-                conversation_history = await db.aget_recent_conversations(str(message.author.id), limit=3)
+
+                conversation_history = await db.aget_recent_conversations(
+                    str(message.author.id), limit=3
+                )
                 for entry in conversation_history:
-                    user_msg = entry.get('user_message', '').strip()
-                    bot_msg = entry.get('bot_response', '').strip()
-                    
+                    user_msg = entry.get("user_message", "").strip()
+                    bot_msg = entry.get("bot_response", "").strip()
+
                     # Only add non-empty messages to avoid API errors
                     if user_msg:
                         messages.append({"role": "user", "content": user_msg})
@@ -821,57 +841,267 @@ class JakeyBot(commands.Bot):
                         messages.append({"role": "assistant", "content": bot_msg})
             except Exception as e:
                 logger.debug(f"Could not load conversation history: {e}")
-            
+
             # Validate messages before sending to AI
             valid_messages = []
             for msg in messages:
-                content = msg.get('content', '').strip()
+                content = msg.get("content", "").strip()
                 if content:  # Only include non-empty messages
                     valid_messages.append(msg)
-            
+
             if len(valid_messages) < 2:  # Need at least system + user message
                 logger.debug("Not enough valid messages for AI response")
                 return
-            
-            # Generate AI response
+
+            # Generate AI response with tools
+            from tools.tool_manager import tool_manager
+
+            available_tools = tool_manager.get_available_tools()
+
             response = await self._ai_manager.generate_text(
                 messages=valid_messages,
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=500,
+                tools=available_tools,
+                tool_choice="auto",
             )
-            
-            if response.get('error'):
+
+            if response.get("error"):
                 logger.error(f"AI generation error: {response['error']}")
-                await message.channel.send("💀 **Sorry, I'm having trouble thinking right now. Try again later.**")
+                await message.channel.send(
+                    "💀 **Sorry, I'm having trouble thinking right now. Try again later.**"
+                )
                 return
-            
-            ai_response = response.get('content', '').strip()
+
+            # Parse OpenAI-format response from providers
+            if "choices" in response and len(response["choices"]) > 0:
+                ai_message = response["choices"][0]["message"]
+                content = ai_message.get("content", "")
+                ai_response = content.strip() if content else ""
+
+                # Handle tool calls if present
+                tool_calls = ai_message.get("tool_calls", [])
+
+                if tool_calls:
+                    # Execute tool calls and build tool responses
+                    from tools.tool_manager import tool_manager
+
+                    # Create tool response messages for the AI
+                    tool_messages = []
+                    for tool_call in tool_calls:
+                        function_name = tool_call["function"]["name"]
+                        try:
+                            # Parse arguments - may already be a dict or may be JSON string
+                            import json
+
+                            args = tool_call["function"]["arguments"]
+                            if isinstance(args, str):
+                                arguments = json.loads(args)
+                            else:
+                                arguments = args
+
+                            # Execute the tool
+                            logger.info(
+                                f"Executing tool: {function_name} with args: {arguments}"
+                            )
+                            result = await tool_manager.execute_tool(
+                                function_name, arguments, str(message.author.id)
+                            )
+
+                            # Add tool response
+                            tool_messages.append(
+                                {
+                                    "role": "tool",
+                                    "content": str(result),
+                                    "tool_call_id": tool_call["id"],
+                                }
+                            )
+                        except Exception as e:
+                            logger.error(f"Error executing tool {function_name}: {e}")
+                            tool_messages.append(
+                                {
+                                    "role": "tool",
+                                    "content": f"Error executing tool {function_name}: {str(e)}",
+                                    "tool_call_id": tool_call["id"],
+                                }
+                            )
+
+                    # Now make a follow-up call with tool results to get final response
+                    if tool_messages:
+                        # Add the original assistant message with tool calls to the conversation
+                        valid_messages.append(
+                            {
+                                "role": "assistant",
+                                "content": ai_response,  # This might be empty if only tool calls were made
+                                "tool_calls": tool_calls,
+                            }
+                        )
+
+                        # Add tool responses to the conversation
+                        valid_messages.extend(tool_messages)
+
+                        # Get the final response from AI based on tool results
+                        final_response = await self._ai_manager.generate_text(
+                            messages=valid_messages, temperature=0.7, max_tokens=500
+                        )
+
+                        if final_response.get("error"):
+                            logger.error(
+                                f"AI final response error: {final_response['error']}"
+                            )
+                            await message.channel.send(
+                                "💀 **Sorry, I'm having trouble getting the final response. Try again later.**"
+                            )
+                            return
+
+                        # Extract the final AI response
+                        if (
+                            "choices" in final_response
+                            and len(final_response["choices"]) > 0
+                        ):
+                            content = final_response["choices"][0]["message"].get(
+                                "content", ""
+                            )
+                            ai_response = content.strip() if content else ""
+                        else:
+                            content = final_response.get("content", "")
+                            ai_response = content.strip() if content else ""
+                else:
+                    # No tool calls, continue with original response
+                    pass
+            else:
+                ai_response = response.get("content", "").strip()
+
             if not ai_response:
                 await message.channel.send("💀 **My mind went blank. Try again?**")
                 return
-            
+
             # Check for repetition
-            is_repetitive, repetition_info = self._is_repetitive_response(str(message.author.id), ai_response)
+            is_repetitive, repetition_info = self._is_repetitive_response(
+                str(message.author.id), ai_response
+            )
             if is_repetitive:
                 logger.debug(f"Repetition detected: {repetition_info}")
-                ai_response = self._generate_non_repetitive_response(message.content, ai_response)
-            
-            # Send the response
+                ai_response = self._generate_non_repetitive_response(
+                    message.content, ai_response
+                )
+
+            # Send the response with typing indicator (no artificial delay)
             async with message.channel.typing():
-                await asyncio.sleep(len(ai_response) / 200)  # Typing simulation
+                pass  # Just show typing indicator without delay
             await message.channel.send(ai_response)
-            
+
             # Store the interaction
             try:
                 from data.database import db
-                await db.aadd_conversation(str(message.author.id), message.content, ai_response)
+
+                await db.aadd_conversation(
+                    str(message.author.id), 
+                    [{"user": message.content, "assistant": ai_response}], 
+                    str(message.channel.id)
+                )
                 self._store_user_response(str(message.author.id), ai_response)
+
+                # Extract and store memories automatically if enabled
+                if AUTO_MEMORY_EXTRACTION_ENABLED:
+                    await self._extract_and_store_memories(
+                        str(message.author.id), message.content, ai_response
+                    )
+
             except Exception as e:
                 logger.debug(f"Could not store conversation: {e}")
-                
+
         except Exception as e:
             logger.error(f"Error in process_jakey_response: {e}")
-            await message.channel.send("💀 **Something went wrong while processing your message.**")
+            await message.channel.send(
+                "💀 **Something went wrong while processing your message.**"
+            )
+
+    async def _extract_and_store_memories(
+        self, user_id: str, user_message: str, bot_response: str
+    ):
+        """
+        Extract meaningful information from the conversation and store it in memory.
+        """
+        try:
+            # Import the memory extractor
+            from memory.auto_memory_extractor import AutoMemoryExtractor
+
+            # Initialize the extractor
+            extractor = AutoMemoryExtractor()
+
+            # Extract memories from the conversation
+            memories = await extractor.extract_memories_from_conversation(
+                user_message, bot_response, user_id
+            )
+
+            if memories:
+                # Filter memories based on confidence threshold
+                filtered_memories = [
+                    m
+                    for m in memories
+                    if m.get("confidence", 1.0)
+                    >= AUTO_MEMORY_EXTRACTION_CONFIDENCE_THRESHOLD
+                ]
+
+                if filtered_memories:
+                    # Store the extracted memories
+                    results = await extractor.store_memories(filtered_memories, user_id)
+                    successful = sum(1 for result in results if result)
+
+                    if successful > 0:
+                        logger.debug(
+                            f"Successfully stored {successful}/{len(filtered_memories)} auto-extracted memories"
+                        )
+                    else:
+                        logger.debug("Failed to store any auto-extracted memories")
+                else:
+                    logger.debug("No memories met confidence threshold")
+
+        except ImportError as e:
+            logger.warning(f"Auto memory extractor not available: {e}")
+        except Exception as e:
+            logger.error(f"Error in automatic memory extraction: {e}")
+
+    async def setup_periodic_memory_cleanup(self):
+        """
+        Set up periodic cleanup of old memories if enabled.
+        """
+        if not AUTO_MEMORY_CLEANUP_ENABLED:
+            logger.debug("Automatic memory cleanup disabled")
+            return
+
+        try:
+            from memory.auto_memory_extractor import MemoryCleanupManager
+
+            cleanup_manager = MemoryCleanupManager()
+
+            # Schedule cleanup to run once per day
+            asyncio.create_task(self._periodic_memory_cleanup_task(cleanup_manager))
+            logger.info("Periodic memory cleanup scheduled")
+
+        except ImportError as e:
+            logger.warning(f"Memory cleanup manager not available: {e}")
+        except Exception as e:
+            logger.error(f"Error setting up periodic memory cleanup: {e}")
+
+    async def _periodic_memory_cleanup_task(self, cleanup_manager):
+        """
+        Periodic task for cleaning up old memories.
+        """
+        while True:
+            try:
+                # Wait 24 hours between cleanups
+                await asyncio.sleep(86400)
+
+                logger.info("Running periodic memory cleanup")
+                await cleanup_manager.cleanup_old_memories(
+                    max_age_days=AUTO_MEMORY_MAX_AGE_DAYS,
+                    confidence_threshold=AUTO_MEMORY_EXTRACTION_CONFIDENCE_THRESHOLD,
+                )
+
+            except Exception as e:
+                logger.error(f"Error in periodic memory cleanup: {e}")
 
     async def process_webhook_relay(self, message):
         """Process webhook relay for incoming messages"""
@@ -889,10 +1119,11 @@ class JakeyBot(commands.Bot):
             # Rest of webhook relay logic would go here
             # For now, just return to avoid errors
             return
-            
+
         except Exception as e:
             logger.error(f"Error in webhook relay: {e}")
             return
+
     async def _check_due_reminders(self):
         """Background task to periodically check for due reminders and send notifications"""
         import datetime
@@ -1030,19 +1261,21 @@ class JakeyBot(commands.Bot):
                 "$ phrasedrop",
                 "$ redpacket",
             )
-):
-                return
+        ):
+            return
 
-                # Check if server is in whitelist (if whitelist is enabled)
+            # Check if server is in whitelist (if whitelist is enabled)
         if AIRDROP_SERVER_WHITELIST:
-            whitelist_servers = (
-                [s.strip() for s in AIRDROP_SERVER_WHITELIST.split(",") if s.strip()]
-            )
+            whitelist_servers = [
+                s.strip() for s in AIRDROP_SERVER_WHITELIST.split(",") if s.strip()
+            ]
             if str(original_message.guild.id) not in whitelist_servers:
-                logger.debug(f"Server {original_message.guild.id} not in airdrop whitelist")
+                logger.debug(
+                    f"Server {original_message.guild.id} not in airdrop whitelist"
+                )
                 return
 
-# Check if user is in ignore list
+        # Check if user is in ignore list
         ignore_users_list = (
             AIRDROP_IGNORE_USERS.split(",") if AIRDROP_IGNORE_USERS else []
         )
@@ -1076,14 +1309,18 @@ class JakeyBot(commands.Bot):
 
         # Check if drop expires too soon
         if AIRDROP_IGNORE_TIME_UNDER > 0 and drop_ends_in < AIRDROP_IGNORE_TIME_UNDER:
-            logger.debug(f"Ignoring drop with only {drop_ends_in:.1f}s remaining (threshold: {AIRDROP_IGNORE_TIME_UNDER}s)")
+            logger.debug(
+                f"Ignoring drop with only {drop_ends_in:.1f}s remaining (threshold: {AIRDROP_IGNORE_TIME_UNDER}s)"
+            )
             return
 
         # Check if drop value is too low (extract from description if available)
         if AIRDROP_IGNORE_DROPS_UNDER > 0:
             drop_value = self._extract_drop_value(embed)
             if drop_value is not None and drop_value < AIRDROP_IGNORE_DROPS_UNDER:
-                logger.debug(f"Ignoring drop worth ${drop_value:.2f} (threshold: ${AIRDROP_IGNORE_DROPS_UNDER:.2f})")
+                logger.debug(
+                    f"Ignoring drop worth ${drop_value:.2f} (threshold: ${AIRDROP_IGNORE_DROPS_UNDER:.2f})"
+                )
                 return
 
         # Apply delay logic
@@ -1101,13 +1338,11 @@ class JakeyBot(commands.Bot):
                             if not button.disabled:
                                 await asyncio.wait_for(button.click(), timeout=5.0)
                                 await asyncio.sleep(2)
-                            await original_message.channel.send("beep boop beep...")
+                            # await original_message.channel.send("ty")
                             logger.info(
                                 f"Entered airdrop in {original_message.channel.name}"
                             )
                             break  # Success, exit retry loop
-                            # else:
-                            logger.warning("Airdrop button is disabled, drop may have expired")  # Commented out - misplaced else
                         except asyncio.TimeoutError:
                             logger.warning(
                                 f"Timeout clicking airdrop button (attempt {attempt + 1}/3)"
@@ -1165,65 +1400,215 @@ class JakeyBot(commands.Bot):
                     logger.warning(f"Invalid trivia category detected: {category}")
                     return
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"https://raw.githubusercontent.com/QuartzWarrior/OTDB-Source/main/{quote(category)}.csv"
-                    ) as resp:
-                        if resp.status == 200:
-                            lines = (await resp.text()).splitlines()
-                            for line in lines:
-                                q, a = line.split(",", 1)
-                                if question == unquote(q).strip():
-                                    if tip_cc_message.components:
-                                        for button in tip_cc_message.components[
-                                            0
-                                        ].children:
-                                            if (
-                                                button.label.strip()
-                                                == unquote(a).strip()
-                                            ):
-                                                # Add timeout handling and retry logic for button clicks
-                                                for attempt in range(
-                                                    3
-                                                ):  # Retry up to 3 times
-                                                    try:
-                                                        await asyncio.wait_for(
-                                                            button.click(), timeout=10.0
-                                                        )
-                                                        logger.info(
-                                                            f"Entered trivia drop in {original_message.channel.name}"
-                                                        )
-                                                        return  # Success, exit function
-                                                    except asyncio.TimeoutError:
-                                                        logger.warning(
-                                                            f"Timeout clicking trivia button (attempt {attempt + 1}/3)"
-                                                        )
-                                                        if (
-                                                            attempt < 2
-                                                        ):  # Don't sleep on the last attempt
-                                                            await asyncio.sleep(
-                                                                2**attempt
-                                                            )  # Exponential backoff
-                                                    except discord.HTTPException as e:
-                                                        logger.error(
-                                                            f"HTTP error clicking trivia button: {e}"
-                                                        )
-                                                        return  # Don't retry on HTTP errors
-                                                    except discord.ClientException as e:
-                                                        logger.warning(
-                                                            f"Client error clicking trivia button (likely timeout): {e}"
-                                                        )
-                                                        if (
-                                                            attempt < 2
-                                                        ):  # Don't sleep on the last attempt
-                                                            await asyncio.sleep(
-                                                                2**attempt
-                                                            )  # Exponential backoff
-                                                    except Exception as e:
-                                                        logger.error(
-                                                            f"Unexpected error clicking trivia button: {e}"
-                                                        )
-                                                        return  # Don't retry on unexpected errors
+                # Use new trivia manager with database and caching
+                try:
+                    from utils.trivia_manager import trivia_manager
+
+                    # Find answer using enhanced trivia system with timeout to prevent blocking
+                    try:
+                        answer = await asyncio.wait_for(
+                            trivia_manager.find_trivia_answer(category, question),
+                            timeout=5.0,  # 5 second timeout for trivia lookup
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            f"Trivia lookup timed out for question in {original_message.channel.name}"
+                        )
+                        answer = None
+                    except Exception as e:
+                        logger.error(f"Error during trivia lookup: {e}")
+                        answer = None
+
+                    if answer and tip_cc_message.components:
+                        for button in tip_cc_message.components[0].children:
+                            if button.label.strip() == answer.strip():
+                                # Add timeout handling and retry logic for button clicks
+                                for attempt in range(3):  # Retry up to 3 times
+                                    try:
+                                        await asyncio.wait_for(
+                                            button.click(), timeout=10.0
+                                        )
+                                        # Record successful trivia completion for learning with timeout
+                                        try:
+                                            await asyncio.wait_for(
+                                                trivia_manager.record_successful_answer(
+                                                    category,
+                                                    question,
+                                                    answer,
+                                                    channel_id=str(
+                                                        original_message.channel.id
+                                                    ),
+                                                    guild_id=str(
+                                                        original_message.guild.id
+                                                    )
+                                                    if original_message.guild
+                                                    else None,
+                                                ),
+                                                timeout=5.0,
+                                            )
+
+                                        except asyncio.TimeoutError:
+                                            logger.warning(
+                                                f"Trivia success recording timed out in {original_message.channel.name}"
+                                            )
+                                        except Exception as e:
+                                            logger.error(
+                                                f"Error recording trivia success: {e}"
+                                            )
+
+                                        # Success - both button click and recording completed
+                                        logger.info(
+                                            f"Entered trivia drop in {original_message.channel.name} (using enhanced trivia system)"
+                                        )
+                                        return  # Success, exit function
+                                    except Exception as e:
+                                        logger.debug(
+                                            f"Failed to click trivia button: {e}"
+                                        )
+                                        if (
+                                            attempt < 2
+                                        ):  # Don't sleep on the last attempt
+                                            await asyncio.sleep(
+                                                2**attempt
+                                            )  # Exponential backoff
+                                    except asyncio.TimeoutError:
+                                        logger.warning(
+                                            f"Timeout clicking trivia button (attempt {attempt + 1}/3)"
+                                        )
+                                        if (
+                                            attempt < 2
+                                        ):  # Don't sleep on the last attempt
+                                            await asyncio.sleep(
+                                                2**attempt
+                                            )  # Exponential backoff
+                                    except discord.HTTPException as e:
+                                        logger.error(
+                                            f"HTTP error clicking trivia button: {e}"
+                                        )
+                                        return  # Don't retry on HTTP errors
+                                    except discord.ClientException as e:
+                                        logger.warning(
+                                            f"Client error clicking trivia button (likely timeout): {e}"
+                                        )
+                                        if (
+                                            attempt < 2
+                                        ):  # Don't sleep on the last attempt
+                                            await asyncio.sleep(
+                                                2**attempt
+                                            )  # Exponential backoff
+                                    except Exception as e:
+                                        logger.error(
+                                            f"Unexpected error clicking trivia button: {e}"
+                                        )
+                                        return  # Don't retry on unexpected errors
+
+                    # No answer found - try random button as fallback if enabled
+                    if (
+                        not answer
+                        and tip_cc_message.components
+                        and TRIVIA_RANDOM_FALLBACK
+                    ):
+                        logger.info(
+                            f"No answer found for trivia question, trying random button in {original_message.channel.name}"
+                        )
+                        await self._try_random_trivia_button(
+                            tip_cc_message, original_message, category, question
+                        )
+
+                except ImportError:
+                    # Fallback to original method if trivia manager not available
+                    logger.warning(
+                        "Trivia manager not available, falling back to original method"
+                    )
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            f"https://raw.githubusercontent.com/QuartzWarrior/OTDB-Source/main/{quote(category)}.csv"
+                        ) as resp:
+                            if resp.status == 200:
+                                lines = (await resp.text()).splitlines()
+                                for line in lines:
+                                    q, a = line.split(",", 1)
+                                    if question == unquote(q).strip():
+                                        if tip_cc_message.components:
+                                            for button in tip_cc_message.components[
+                                                0
+                                            ].children:
+                                                if (
+                                                    button.label.strip()
+                                                    == unquote(a).strip()
+                                                ):
+                                                    # Add timeout handling and retry logic for button clicks
+                                                    for attempt in range(
+                                                        3
+                                                    ):  # Retry up to 3 times
+                                                        try:
+                                                            await asyncio.wait_for(
+                                                                button.click(),
+                                                                timeout=10.0,
+                                                            )
+                                                            # Record successful trivia completion for learning (fallback method)
+                                                            try:
+                                                                from utils.trivia_manager import (
+                                                                    trivia_manager,
+                                                                )
+
+                                                                await trivia_manager.record_successful_answer(
+                                                                    category,
+                                                                    question,
+                                                                    unquote(a).strip(),
+                                                                )
+                                                            except Exception as e:
+                                                                logger.debug(
+                                                                    f"Failed to record trivia answer (fallback): {e}"
+                                                                )
+
+                                                            logger.info(
+                                                                f"Entered trivia drop in {original_message.channel.name}"
+                                                            )
+                                                            return  # Success, exit function
+                                                        except asyncio.TimeoutError:
+                                                            logger.warning(
+                                                                f"Timeout clicking trivia button (attempt {attempt + 1}/3)"
+                                                            )
+                                                            if (
+                                                                attempt < 2
+                                                            ):  # Don't sleep on the last attempt
+                                                                await asyncio.sleep(
+                                                                    2**attempt
+                                                                )  # Exponential backoff
+                                                        except (
+                                                            discord.HTTPException
+                                                        ) as e:
+                                                            logger.error(
+                                                                f"HTTP error clicking trivia button: {e}"
+                                                            )
+                                                            return  # Don't retry on HTTP errors
+                                                        except (
+                                                            discord.ClientException
+                                                        ) as e:
+                                                            logger.warning(
+                                                                f"Client error clicking trivia button (likely timeout): {e}"
+                                                            )
+                                                            if (
+                                                                attempt < 2
+                                                            ):  # Don't sleep on the last attempt
+                                                                await asyncio.sleep(
+                                                                    2**attempt
+                                                                )  # Exponential backoff
+                                                        except Exception as e:
+                                                            logger.error(
+                                                                f"Unexpected error clicking trivia button: {e}"
+                                                            )
+                                                            return  # Don't retry on unexpected errors
+
+                            # If we get here, no answer was found in fallback either - try random if enabled
+                            if tip_cc_message.components and TRIVIA_RANDOM_FALLBACK:
+                                logger.info(
+                                    f"Fallback method also failed, trying random button in {original_message.channel.name}"
+                                )
+                                await self._try_random_trivia_button(
+                                    tip_cc_message, original_message, category, question
+                                )
 
             # Redpacket
             elif "appeared" in embed.title.lower() and not AIRDROP_DISABLE_REDPACKET:
@@ -1278,8 +1663,9 @@ class JakeyBot(commands.Bot):
         """Validate trivia category to prevent directory traversal and injection attacks."""
         import re
 
-        # Allow only alphanumeric characters, spaces, hyphens, and underscores
-        if not re.match(r"^[a-zA-Z0-9\s\-_]+$", category):
+        # Allow alphanumeric characters, spaces, hyphens, underscores, and colons
+        # This allows categories like "Entertainment: Music" or "Science: Technology"
+        if not re.match(r"^[a-zA-Z0-9\s\-_:]+$", category):
             return False
 
         # Prevent directory traversal attempts
@@ -1290,8 +1676,8 @@ class JakeyBot(commands.Bot):
         if "\x00" in category or "\n" in category or "\r" in category:
             return False
 
-        # Reasonable length limit
-        if len(category) > 50:
+        # Reasonable length limit (increased for longer category names)
+        if len(category) > 100:
             return False
 
         # Strip whitespace and check if still valid
@@ -1300,6 +1686,79 @@ class JakeyBot(commands.Bot):
             return False
 
         return True
+
+    async def _try_random_trivia_button(
+        self, tip_cc_message, original_message, category: str, question: str
+    ):
+        """Try a random trivia button when no answer is known"""
+        try:
+            import random
+
+            if (
+                not tip_cc_message.components
+                or not tip_cc_message.components[0].children
+            ):
+                logger.warning("No buttons available for random trivia selection")
+                return
+
+            # Get all available buttons
+            buttons = list(tip_cc_message.components[0].children)
+            random_button = random.choice(buttons)
+            random_answer = random_button.label.strip()
+
+            logger.info(f"Trying random trivia answer: {random_answer}")
+
+            # Try to click the random button with retry logic
+            for attempt in range(3):  # Retry up to 3 times
+                try:
+                    await asyncio.wait_for(random_button.click(), timeout=10.0)
+
+                    # Record the random attempt for learning (marked as guess)
+                    try:
+                        from utils.trivia_manager import trivia_manager
+
+                        await trivia_manager.record_successful_answer(
+                            category,
+                            question,
+                            random_answer,
+                            channel_id=str(original_message.channel.id),
+                            guild_id=str(original_message.guild.id)
+                            if original_message.guild
+                            else None,
+                        )
+                        logger.info(f"Recorded random trivia guess: {random_answer}")
+                    except Exception as e:
+                        logger.debug(f"Failed to record random trivia guess: {e}")
+
+                    logger.info(
+                        f"Entered random trivia answer in {original_message.channel.name} (guess)"
+                    )
+                    return  # Success, exit function
+
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Timeout clicking random trivia button (attempt {attempt + 1}/3)"
+                    )
+                    if attempt < 2:  # Don't sleep on the last attempt
+                        await asyncio.sleep(2**attempt)  # Exponential backoff
+
+                except discord.HTTPException as e:
+                    logger.error(f"HTTP error clicking random trivia button: {e}")
+                    return  # Don't retry on HTTP errors
+
+                except discord.ClientException as e:
+                    logger.warning(
+                        f"Client error clicking random trivia button (likely timeout): {e}"
+                    )
+                    if attempt < 2:  # Don't sleep on the last attempt
+                        await asyncio.sleep(2**attempt)  # Exponential backoff
+
+                except Exception as e:
+                    logger.error(f"Unexpected error clicking random trivia button: {e}")
+                    return  # Don't retry on unexpected errors
+
+        except Exception as e:
+            logger.error(f"Error in random trivia button selection: {e}")
 
     def safe_eval_math(self, expr: str):
         """Safely evaluate basic math expressions using AST-based evaluation."""
@@ -1361,54 +1820,54 @@ class JakeyBot(commands.Bot):
     def _extract_drop_value(self, embed) -> Optional[float]:
         """Extract drop value from tip.cc embed."""
         import re
-        
+
         try:
             # Check embed description for value patterns
             if embed.description:
                 # Look for patterns like "$0.50", "0.50 USD", "50 cents", etc.
                 patterns = [
-                    r'\$(\d+\.?\d*)',  # $0.50
-                    r'(\d+\.?\d*)\s*USD',  # 0.50 USD
-                    r'(\d+\.?\d*)\s*dollar',  # 0.50 dollar
-                    r'(\d+)\s*cent',  # 50 cents
+                    r"\$(\d+\.?\d*)",  # $0.50
+                    r"(\d+\.?\d*)\s*USD",  # 0.50 USD
+                    r"(\d+\.?\d*)\s*dollar",  # 0.50 dollar
+                    r"(\d+)\s*cent",  # 50 cents
                 ]
-                
+
                 for pattern in patterns:
                     match = re.search(pattern, embed.description, re.IGNORECASE)
                     if match:
                         value = float(match.group(1))
                         # Convert cents to dollars if needed
-                        if 'cent' in pattern.lower() and value > 1:
+                        if "cent" in pattern.lower() and value > 1:
                             value = value / 100
                         return value
-            
+
             # Check embed title for value patterns
             if embed.title:
                 title_patterns = [
-                    r'\$(\d+\.?\d*)',
-                    r'(\d+\.?\d*)\s*USD',
+                    r"\$(\d+\.?\d*)",
+                    r"(\d+\.?\d*)\s*USD",
                 ]
-                
+
                 for pattern in title_patterns:
                     match = re.search(pattern, embed.title, re.IGNORECASE)
                     if match:
                         return float(match.group(1))
-            
+
             # Check embed fields if available
-            if hasattr(embed, 'fields') and embed.fields:
+            if hasattr(embed, "fields") and embed.fields:
                 for field in embed.fields:
-                    if field.name and 'value' in field.name.lower():
+                    if field.name and "value" in field.name.lower():
                         # Look for value in the field value
                         if field.value:
-                            patterns = [r'\$(\d+\.?\d*)', r'(\d+\.?\d*)\s*USD']
+                            patterns = [r"\$(\d+\.?\d*)", r"(\d+\.?\d*)\s*USD"]
                             for pattern in patterns:
                                 match = re.search(pattern, field.value, re.IGNORECASE)
                                 if match:
                                     return float(match.group(1))
-        
+
         except Exception as e:
             logger.debug(f"Error extracting drop value: {e}")
-        
+
         return None
 
     async def on_member_join(self, member):
@@ -1614,7 +2073,8 @@ class JakeyBot(commands.Bot):
                 {"role": "user", "content": custom_prompt},
             ]
 
-            response = self.pollinations_api.generate_text(
+            response = await asyncio.to_thread(
+                self.pollinations_api.generate_text,
                 messages=messages,
                 model=self.current_model,
                 max_tokens=200,
@@ -1686,7 +2146,9 @@ class JakeyBot(commands.Bot):
 
             # Check if Pollinations is healthy now
             try:
-                pollinations_health = self.pollinations_api.check_service_health()
+                pollinations_health = await asyncio.to_thread(
+                    self.pollinations_api.check_service_health
+                )
                 if not pollinations_health.get("healthy", False):
                     logger.info(
                         "Pollinations still unhealthy, keeping OpenRouter fallback"
@@ -2095,7 +2557,7 @@ class JakeyBot(commands.Bot):
                                         f"Fallback: Clicking button: {button_info['custom_id']}"
                                     )
                                     await button_info["button"].click()
-                                    logger.info("Fallback button click successful")
+                                    logger.info("Fallback button clicked")
                                     return True
                                 except discord.errors.HTTPException as e:
                                     logger.error(f"Fallback button click failed: {e}")
@@ -2290,7 +2752,7 @@ class JakeyBot(commands.Bot):
                                         f"Fallback: Clicking button: {button_info['custom_id']}"
                                     )
                                     await button_info["button"].click()
-                                    logger.info("Fallback button click successful")
+                                    logger.info("Fallback button clicked")
                                     return True
                                 except discord.errors.HTTPException as e:
                                     logger.error(f"Fallback button click failed: {e}")
