@@ -1761,13 +1761,58 @@ class ToolManager:
             # Import db here to avoid circular imports
             from data.database import db
 
-            # Validate trigger_time format (ISO 8601)
+            # Parse and validate trigger_time (support multiple formats)
             try:
                 import datetime
-
-                datetime.datetime.fromisoformat(trigger_time.replace("Z", "+00:00"))
-            except ValueError:
-                return "Invalid trigger_time format. Please use ISO 8601 format (e.g., '2025-10-03T15:00:00Z')"
+                
+                # Try to parse various time formats
+                parsed_time = None
+                
+                # Try ISO 8601 format first
+                try:
+                    parsed_time = datetime.datetime.fromisoformat(trigger_time.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+                
+                # Try time formats like "12:15PM", "3:30 PM", etc.
+                if not parsed_time:
+                    try:
+                        # Handle both 12:15PM and 12:15 PM formats
+                        time_str = trigger_time.replace(" ", "").upper()
+                        parsed_time = datetime.datetime.strptime(time_str, "%I:%M%p")
+                        # Set to today's date
+                        now = datetime.datetime.now()
+                        parsed_time = parsed_time.replace(year=now.year, month=now.month, day=now.day)
+                        # If time is in the past, set to tomorrow
+                        if parsed_time <= now:
+                            parsed_time += datetime.timedelta(days=1)
+                    except ValueError:
+                        pass
+                
+                # Try time formats like "12:15", "15:30", etc.
+                if not parsed_time:
+                    try:
+                        # Try 24-hour format
+                        if ":" in trigger_time:
+                            time_parts = trigger_time.split(":")
+                            if len(time_parts) == 2:
+                                hour, minute = int(time_parts[0]), int(time_parts[1])
+                                now = datetime.datetime.now()
+                                parsed_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                # If time is in the past, set to tomorrow
+                                if parsed_time <= now:
+                                    parsed_time += datetime.timedelta(days=1)
+                    except (ValueError, IndexError):
+                        pass
+                
+                if not parsed_time:
+                    raise ValueError(f"Could not parse time format: {trigger_time}")
+                
+                # Convert to ISO 8601 format for storage
+                trigger_time = parsed_time.isoformat()
+                
+            except ValueError as e:
+                return f"Invalid trigger_time format: {trigger_time}. Please use formats like '12:15PM', '15:30', or '2025-10-03T15:00:00Z'"
 
             # Create the reminder
             reminder_id = db.add_reminder(
@@ -2257,8 +2302,23 @@ class ToolManager:
                     mapped_arguments["site"] = parts[0]
                     mapped_arguments["frequency"] = "weekly"
 
-        # Add user_id to arguments for methods that support it
-        if (
+        # Add/override user_id for methods that should use the actual Discord user ID
+        # These tools should always use the real user ID from the message context, not what the AI provides
+        user_id_override_tools = [
+            "set_reminder",
+            "list_reminders", 
+            "cancel_reminder",
+            "remember_user_info",
+            "search_user_memory"
+        ]
+        if tool_name in user_id_override_tools:
+            mapped_arguments["user_id"] = user_id
+        elif (
+            tool_name in ["get_crypto_price", "get_stock_price"]
+            and "user_id" not in mapped_arguments
+        ):
+            mapped_arguments["user_id"] = user_id
+        elif (
             tool_name in ["get_crypto_price", "get_stock_price"]
             and "user_id" not in mapped_arguments
         ):

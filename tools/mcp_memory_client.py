@@ -211,6 +211,13 @@ class MCPMemoryClient:
                             "error": "Authentication failed - invalid or missing token"
                         }
                     result = await response.json()
+            elif method == "DELETE":
+                async with self.session.delete(url, headers=headers) as response:
+                    if response.status == 401:
+                        return {
+                            "error": "Authentication failed - invalid or missing token"
+                        }
+                    result = await response.json()
             else:
                 return {"error": f"Unsupported HTTP method: {method}"}
 

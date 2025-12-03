@@ -80,10 +80,20 @@ class SQLiteMemoryBackend(MemoryBackend):
 
     async def delete(self, user_id: str, key: Optional[str] = None) -> bool:
         """Delete memory entries from SQLite"""
-        # Note: Current SQLite implementation doesn't support deletion
-        # This could be added by extending the database schema
-        logger.warning("SQLite memory backend does not support deletion")
-        return False
+        try:
+            if key:
+                # Delete specific memory key (not currently implemented in database)
+                # For now, delete all memories for the user
+                logger.warning(f"SQLite backend does not support deleting specific keys. Deleting all memories for user {user_id}")
+                await self.db.adelete_memories(user_id)
+            else:
+                # Delete all memories for the user
+                deleted_count = await self.db.adelete_memories(user_id)
+                logger.info(f"Deleted {deleted_count} memories for user {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"SQLite memory deletion failed: {e}")
+            return False
 
     async def health_check(self) -> bool:
         """Check if SQLite backend is healthy"""

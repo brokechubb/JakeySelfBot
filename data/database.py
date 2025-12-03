@@ -411,6 +411,23 @@ class DatabaseManager:
 
         return row[0] if row else None
 
+    def delete_memories(self, user_id: str) -> int:
+        """Delete all memories for a user and return the count of deleted memories"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Count memories before deletion
+        cursor.execute("SELECT COUNT(*) FROM memories WHERE user_id = ?", (user_id,))
+        count = cursor.fetchone()[0]
+
+        # Delete all memories for this user
+        cursor.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
+
+        conn.commit()
+        conn.close()
+
+        return count
+
     def clear_user_history(self, user_id: str):
         """Clear conversation history for a user"""
         conn = sqlite3.connect(self.db_path)
@@ -570,6 +587,11 @@ class DatabaseManager:
         """Async version of get_memory"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self._executor, self.get_memory, user_id, key)
+
+    async def adelete_memories(self, user_id: str) -> int:
+        """Async version of delete_memories"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, self.delete_memories, user_id)
 
     async def aclear_channel_history(self, channel_id: str):
         """Async version of clear_channel_history"""
