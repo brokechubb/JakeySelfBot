@@ -85,6 +85,7 @@ from config import (
     AIRDROP_DISABLE_MATHDROP,
     AIRDROP_DISABLE_PHRASEDROP,
     AIRDROP_DISABLE_REDPACKET,
+    AIRDROP_DISABLE_TRIVIADROP,
     AIRDROP_IGNORE_DROPS_UNDER,
     AIRDROP_IGNORE_TIME_UNDER,
     AIRDROP_IGNORE_USERS,
@@ -1460,6 +1461,13 @@ class JakeyBot(commands.Bot):
                                         logger.info(
                                             f"Entered trivia drop in {original_message.channel.name} (using enhanced trivia system)"
                                         )
+                                        # Announce the correct answer in the channel
+                                        try:
+                                            await original_message.channel.send(
+                                                f"Trivia Answer: {answer}"
+                                            )
+                                        except Exception as e:
+                                            logger.error(f"Failed to announce trivia answer: {e}")
                                         return  # Success, exit function
                                     except Exception as e:
                                         logger.debug(
@@ -1565,6 +1573,13 @@ class JakeyBot(commands.Bot):
                                                             logger.info(
                                                                 f"Entered trivia drop in {original_message.channel.name}"
                                                             )
+                                                            # Announce the correct answer in the channel
+                                                            try:
+                                                                await original_message.channel.send(
+                                                                    f"Trivia Answer: {unquote(a).strip()}"
+                                                                )
+                                                            except Exception as e:
+                                                                logger.error(f"Failed to announce trivia answer: {e}")
                                                             return  # Success, exit function
                                                         except asyncio.TimeoutError:
                                                             logger.warning(

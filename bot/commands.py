@@ -2359,7 +2359,13 @@ def setup_commands(bot):
             stats_message += (
                 f"📥 **Total Tips Received**: ${stats['total_received_usd']:.2f}\n"
             )
-            stats_message += f"💰 **Net Profit**: ${stats['net_profit_usd']:.2f}\n\n"
+            
+            # Check if the enhanced stats with airdrop spending are available
+            if 'total_airdrop_spent_usd' in stats:
+                stats_message += f"💸 **Total Airdrops Spent**: ${stats['total_airdrop_spent_usd']:.2f}\n"
+                stats_message += f"💰 **Net Profit**: ${stats['net_profit_usd']:.2f}\n\n"
+            else:
+                stats_message += f"💰 **Net Profit**: ${stats['net_profit_usd']:.2f}\n\n"
 
             # Show transaction counts
             stats_message += "**Transaction Counts:**\n"
@@ -2373,6 +2379,32 @@ def setup_commands(bot):
 
         except Exception as e:
             await ctx.send(handle_command_error(e, ctx, "tipstats"))
+
+    @bot.command(name="clearstats")
+    async def clearstats(ctx):
+        """Clear all tip.cc transaction history and stats (admin only)"""
+        # Check if user is admin
+        if not is_admin(ctx.author.id):
+            await ctx.send("💀 Admin only command bro!")
+            return
+
+        try:
+            # Clear tip.cc transactions
+            success = await bot.db.aclear_tipcc_transactions()
+            if success:
+                # Also clear balances to start completely fresh
+                balances_cleared = await bot.db.aclear_balances()
+                
+                await ctx.send(
+                    "✅ **Tip.cc transaction history cleared!**\n"
+                    "📊 All tipstats and transactions have been reset to zero.\n"
+                    "💰 Balances have also been cleared for a fresh start."
+                )
+            else:
+                await ctx.send("💀 **Failed to clear transaction history.** Check logs for details.")
+                
+        except Exception as e:
+            await ctx.send(handle_command_error(e, ctx, "clearstats"))
 
     @bot.command(name="airdropstatus")
     async def airdropstatus(ctx):

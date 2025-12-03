@@ -665,6 +665,19 @@ class DatabaseManager:
             logger.error(f"Error clearing balances: {e}")
             return False
 
+    def clear_tipcc_transactions(self) -> bool:
+        """Clear all tip.cc transactions from database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tipcc_transactions")
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing tip.cc transactions: {e}")
+            return False
+
     def get_total_usd_balance(self) -> float:
         """Get total USD value of all balances"""
         conn = sqlite3.connect(self.db_path)
@@ -806,6 +819,11 @@ class DatabaseManager:
         """Async version of clear_balances"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self._executor, self.clear_balances)
+
+    async def aclear_tipcc_transactions(self) -> bool:
+        """Async version of clear_tipcc_transactions"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._executor, self.clear_tipcc_transactions)
 
     async def aget_total_usd_balance(self) -> float:
         """Async version of get_total_usd_balance"""

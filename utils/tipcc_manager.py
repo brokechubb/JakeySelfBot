@@ -94,6 +94,21 @@ class TipCCManager:
             await channel.send(airdrop_command)
             logger.info(f"Sent airdrop command: {airdrop_command}")
 
+            # Record the airdrop as a sent transaction (money spent by Jakey)
+            # This is the cost of the airdrop that will be distributed to participants
+            currency_safe = currency.upper().strip()
+            if amount.lower() == 'all':
+                usd_value = 0.0  # Can't estimate USD value for "all"
+                record_amount = -1.0  # Use -1 to indicate "all" amount
+            else:
+                record_amount = float(amount)
+                usd_value = await self._estimate_usd_value(record_amount, currency_safe)
+
+            # Record this as a tip_sent transaction (money going out from Jakey)
+            sender_id = str(self.bot.user.id) if self.bot and self.bot.user else None
+            if sender_id:  # Only record if we have a valid sender ID
+                await db.aadd_transaction('airdrop_sent', currency_safe, record_amount, usd_value, 'participants', f'Airdrop for {duration}', sender_id)
+
             return True
 
         except Exception as e:
