@@ -1380,8 +1380,6 @@ class JakeyBot(commands.Bot):
                     logger.info(f"Entered phrase drop in {original_message.channel.name}")
                 else:
                     logger.warning(f"Failed to extract phrase from embed: {embed.description}")
-                else:
-                    logger.warning(f"Failed to extract phrase from embed: {embed.description}")
 
             # Math drop
             elif "math" in embed.title.lower() and not AIRDROP_DISABLE_MATHDROP:
