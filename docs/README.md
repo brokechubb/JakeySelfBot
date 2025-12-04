@@ -5,11 +5,13 @@ Comprehensive documentation for Jakey, the Discord self-bot with AI capabilities
 ## Documentation Structure
 
 ### Core Documentation
+
 - [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - Project overview and status
 - [COMMANDS.md](COMMANDS.md) - Command reference (35 commands)
 - [PRODUCTION_STATUS.md](PRODUCTION_STATUS.md) - Production readiness and tests
 
 ### Feature Documentation
+
 - [TIPCC_INTEGRATION.md](TIPCC_INTEGRATION.md) - Crypto tipping and balance tracking
 - [ARTA_IMAGE_GENERATION.md](ARTA_IMAGE_GENERATION.md) - Artistic image generation (49 styles)
 - [AIRDROP_CLAIMING.md](AIRDROP_CLAIMING.md) - Automated airdrop claiming
@@ -19,17 +21,19 @@ Comprehensive documentation for Jakey, the Discord self-bot with AI capabilities
 - [CRYPTO_PRICE.md](CRYPTO_PRICE.md) - Cryptocurrency price integration
 
 ### Technical Documentation
+
 - [POLLINATIONS_API.md](POLLINATIONS_API.md) - AI API integration
 - [MEMORY_SYSTEM.md](MEMORY_SYSTEM.md) - User memory storage
-- [MCP_MEMORY_ROADMAP.md](MCP_MEMORY_ROADMAP.md) - MCP memory server roadmap
 - [MCP_MEMORY_SECURITY.md](MCP_MEMORY_SECURITY.md) - Memory system security
 - [LOGGING.md](LOGGING.md) - Logging configuration
 
 ### Role Management
+
 - [REACTION_ROLES.md](REACTION_ROLES.md) - Reaction role system
 - [GENDER_ROLES.md](GENDER_ROLES.md) - Gender role recognition
 
 ### Additional Features
+
 - [WELCOME_MESSAGES.md](WELCOME_MESSAGES.md) - AI welcome messages
 - [TIP_THANK_YOU_FEATURE.md](TIP_THANK_YOU_FEATURE.md) - Auto thank you messages
 - [TIME_DATE_FEATURES.md](TIME_DATE_FEATURES.md) - Time and date commands

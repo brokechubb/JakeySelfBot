@@ -15,6 +15,7 @@ The trivia system consists of:
 ## Database Schema
 
 ### Categories Table
+
 ```sql
 CREATE TABLE trivia_categories (
     id INTEGER PRIMARY KEY,
@@ -29,6 +30,7 @@ CREATE TABLE trivia_categories (
 ```
 
 ### Questions Table
+
 ```sql
 CREATE TABLE trivia_questions (
     id INTEGER PRIMARY KEY,
@@ -48,6 +50,7 @@ CREATE TABLE trivia_questions (
 ```
 
 ### Statistics Table
+
 ```sql
 CREATE TABLE trivia_stats (
     id INTEGER PRIMARY KEY,
@@ -62,6 +65,7 @@ CREATE TABLE trivia_stats (
 ```
 
 ### Cache Table
+
 ```sql
 CREATE TABLE trivia_cache (
     category_name TEXT PRIMARY KEY,
@@ -174,12 +178,3 @@ The system uses the following external trivia sources:
 - **Database Cleanup**: Regularly clean old or unused questions
 - **Cache Refresh**: Refresh external caches periodically
 - **Statistics Reset**: Use admin commands to reset statistics if needed
-
-## Future Enhancements
-
-- **Machine Learning**: AI-powered answer prediction for unknown questions
-- **User Contributions**: Allow users to submit new questions
-- **Advanced Analytics**: Detailed performance dashboards
-- **Multi-language Support**: Trivia in multiple languages
-- **Custom Categories**: User-created trivia categories</content>
-<parameter name="filePath">docs/TRIVIA_SYSTEM.md
