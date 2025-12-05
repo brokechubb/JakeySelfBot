@@ -692,9 +692,7 @@ class JakeyBot(commands.Bot):
                             return  # Don't process as regular message
 
                         except Exception as e:
-                            await message.channel.send(
-                                "💀 Command failed, probably Eddie's fault"
-                            )
+                            # Silent fail - don't expose automation errors to Discord
                             logger.error(f"Command execution failed: {e}")
 
                             return  # Don't process as regular message
@@ -1016,10 +1014,8 @@ class JakeyBot(commands.Bot):
                 logger.debug(f"Could not store conversation: {e}")
 
         except Exception as e:
+            # Silent fail - don't expose automation errors to Discord
             logger.error(f"Error in process_jakey_response: {e}")
-            await message.channel.send(
-                "💀 **Something went wrong while processing your message.**"
-            )
 
     async def _extract_and_store_memories(
         self, user_id: str, user_message: str, bot_response: str
