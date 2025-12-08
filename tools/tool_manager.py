@@ -1577,7 +1577,11 @@ class ToolManager:
 
             # Check if there was an error
             if "error" in result:
-                return f"Error analyzing image: {result['error']}"
+                error_msg = result["error"]
+                # Provide more helpful message for Tenor URLs
+                if "tenor.com" in image_url.lower():
+                    return f"Cannot analyze Tenor GIF directly. Please provide a direct image URL (ending with .jpg, .png, .gif, etc.) instead of the Tenor page URL."
+                return f"Error analyzing image: {error_msg}"
 
             # Extract the response text
             if "choices" in result and len(result["choices"]) > 0:

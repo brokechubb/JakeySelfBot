@@ -758,16 +758,26 @@ class TipCCManager:
                             cancel_button = child
                             logger.info("Found Cancel button")
             
-            # Click the Confirm button if found and not disabled
+            # Click the Confirm button if found and not disabled - Optimized for speed
             if confirm_button and not getattr(confirm_button, 'disabled', False):
+                # Ultra-fast confirmation click - minimal overhead
                 try:
-                    logger.info("Auto-clicking Confirm button on tip.cc confirmation message")
-                    await confirm_button.click()
+                    logger.debug("Attempting instant confirm button click")
+                    await asyncio.wait_for(confirm_button.click(), timeout=1.5)
                     logger.info("Successfully clicked Confirm button")
+                except asyncio.TimeoutError:
+                    logger.debug("Confirm button click timeout")
+                except discord.HTTPException as e:
+                    if "10008" in str(e):
+                        logger.debug("Confirmation message expired")
+                    else:
+                        logger.debug(f"Confirm HTTP error: {e}")
+                except discord.ClientException as e:
+                    logger.debug(f"Confirm client error: {e}")
                 except Exception as e:
-                    logger.error(f"Failed to click Confirm button: {e}")
+                    logger.debug(f"Confirm unexpected error: {e}")
             else:
-                logger.warning("Confirm button not found or disabled")
+                logger.debug("Confirm button not found or disabled")
                 
         except Exception as e:
             logger.error(f"Error handling confirmation message: {e}")

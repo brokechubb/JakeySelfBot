@@ -1304,10 +1304,10 @@ class JakeyBot(commands.Bot):
         logger.debug(f"Detected potential drop: {original_message.content}")
 
         try:
-            # Wait for the tip.cc bot response
+            # Wait for the tip.cc bot response - reduced timeout for faster response
             tip_cc_message = await self.wait_for(
                 "message",
-                timeout=15,
+                timeout=8,  # Reduced from 15s for faster airdrops
                 check=lambda m: (
                     m.author.id == 617037497574359050
                     and m.channel.id == original_message.channel.id
@@ -1342,46 +1342,69 @@ class JakeyBot(commands.Bot):
                 )
                 return
 
-        # Apply delay logic
-        await self.maybe_delay(drop_ends_in)
+        # Apply delay logic - optimized for ultra-fast airdrops
+        if drop_ends_in <= 10:  # For fast airdrops (1-10s), minimize delay
+            if AIRDROP_SMART_DELAY:
+                # Very aggressive delay for fast airdrops - max 0.5s
+                delay = min(drop_ends_in / 20, 0.5) if drop_ends_in > 1 else 0
+            elif AIRDROP_RANGE_DELAY:
+                delay = uniform(0, 0.2)  # Minimal random delay
+            else:
+                delay = 0  # No delay for fast airdrops
+        else:
+            # Use normal delay logic for longer airdrops
+            await self.maybe_delay(drop_ends_in)
+            delay = 0  # Skip the sleep below since we already waited
+            
+        if delay > 0:
+            logger.debug(f"Fast airdrop delay: {round(delay, 3)}s")
+            await asyncio.sleep(delay)
 
         try:
-            # Airdrop
+            # Airdrop - Optimized for 1-10s window
             if "airdrop" in embed.title.lower() and not AIRDROP_DISABLE_AIRDROP:
-                if tip_cc_message.components:
+                if tip_cc_message.components and tip_cc_message.components[0].children:
                     button = tip_cc_message.components[0].children[0]
-                    # Add timeout handling and retry logic for button clicks
-                    for attempt in range(3):  # Retry up to 3 times
+                    
+                    # Ultra-fast retry logic - no delays, minimal validation
+                    for attempt in range(2):  # Only 2 attempts for speed
                         try:
-                            # Validate button is still clickable before attempting
-                            if not button.disabled:
-                                await asyncio.wait_for(button.click(), timeout=5.0)
-                                await asyncio.sleep(2)
-                            # await original_message.channel.send("ty")
-                            logger.info(
-                                f"Entered airdrop in {original_message.channel.name}"
-                            )
-                            break  # Success, exit retry loop
+                            # Skip most validations for speed - only check if button is disabled
+                            if getattr(button, 'disabled', False):
+                                logger.debug("Airdrop button disabled - drop closed")
+                                break
+                            
+                            # Fast click with minimal timeout
+                            await asyncio.wait_for(button.click(), timeout=2.0)
+                            
+                            logger.info(f"Entered airdrop in {original_message.channel.name}")
+                            break  # Success
+                            
                         except asyncio.TimeoutError:
-                            logger.warning(
-                                f"Timeout clicking airdrop button (attempt {attempt + 1}/3)"
-                            )
-                            if attempt < 2:  # Don't sleep on the last attempt
-                                await asyncio.sleep(1)  # Reduced backoff time
+                            # Immediate retry on timeout - no sleeping
+                            if attempt == 0:  # Only log first timeout
+                                logger.debug("Airdrop click timeout, retrying immediately...")
+                                
                         except discord.HTTPException as e:
-                            logger.error(f"HTTP error clicking airdrop button: {e}")
-                            break  # Don't retry on HTTP errors
+                            # Fast error handling - no retries for most HTTP errors
+                            if "10008" in str(e):  # Unknown Message
+                                logger.debug("Airdrop expired (404)")
+                            elif "50035" in str(e):  # Invalid Form Body  
+                                logger.debug("Airdrop closed (400)")
+                            else:
+                                logger.debug(f"Airdrop HTTP error: {e}")
+                            break
+                            
                         except discord.ClientException as e:
-                            logger.warning(
-                                f"Client error clicking airdrop button (likely timeout): {e}"
-                            )
-                            if attempt < 2:  # Don't sleep on the last attempt
-                                await asyncio.sleep(1)  # Reduced backoff time
+                            # One immediate retry on client error, then give up
+                            if attempt == 0:
+                                logger.debug("Airdrop client error, retrying...")
+                            else:
+                                logger.debug(f"Airdrop client error failed: {e}")
+                                
                         except Exception as e:
-                            logger.error(
-                                f"Unexpected error clicking airdrop button: {e}"
-                            )
-                            break  # Don't retry on unexpected errors
+                            logger.debug(f"Airdrop unexpected error: {e}")
+                            break
 
 # Phrase drop
             elif (

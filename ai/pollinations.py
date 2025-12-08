@@ -645,6 +645,16 @@ class PollinationsAPI:
         """
         Analyze an image using Pollinations API vision capabilities
         """
+        # Check if URL is a direct image link
+        if not any(
+            image_url.lower().endswith(ext)
+            for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"]
+        ):
+            logger.warning(f"Invalid image URL format: {image_url}")
+            return {
+                "error": "URL must be a direct image link (ending with .jpg, .jpeg, .png, .gif, .webp, .bmp, or .svg)"
+            }
+
         payload = {
             "model": "openai",
             "messages": [
