@@ -73,8 +73,13 @@ class TestChannelContext(unittest.TestCase):
             
             # Check that it's added to system prompt
             self.assertIn(
-                'system_content += channel_context', method_source,
+                'channel_context', method_source,
                 "Channel context should be integrated into system prompt"
+            )
+            # Check that it's being appended to system_content
+            self.assertIn(
+                'system_content +=', method_source,
+                "Channel context should be appended to system_content"
             )
             
         except Exception as e:

@@ -750,6 +750,23 @@ class ToolManager:
             {
                 "type": "function",
                 "function": {
+                    "name": "discord_get_user_roles",
+                    "description": "Get roles for the currently logged-in user in a specific Discord guild",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "guild_id": {
+                                "type": "string",
+                                "description": "The Discord guild ID to get user roles from",
+                            },
+                        },
+                        "required": ["guild_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "discord_send_message",
                     "description": "Send a message to a specific Discord channel",
                     "parameters": {
@@ -1340,19 +1357,35 @@ class ToolManager:
             return "Invalid search query. Please check your input and try again."
 
         # List of SearXNG instances (local first, then public fallback)
+        # Reduced list to speed up failover
         public_instances = [
-            "http://localhost:8086",  # Local SearXNG instance
+            "http://localhost:8086",  # Local SearXNG instance (fastest if available)
             "https://searx.be",
             "https://metacat.online",
-            "https://nyc1.sx.ggtyler.dev",
         ]
 
-        # Shuffle the instances for better distribution
-        random.shuffle(public_instances)
+        # Shuffle the instances for better distribution (keep local first for speed)
+        local_first = public_instances[:1]
+        others = public_instances[1:]
+        random.shuffle(others)
+        public_instances = local_first + others
+
+        # Set overall timeout to prevent hanging
+        import time
+        start_time = time.time()
+        max_total_time = 20  # Maximum 20 seconds total for web search
+
+        logger.info(f"web_search trying instances: {public_instances}")
 
         # Try each instance until one works
         for instance in public_instances:
+            # Check if we've exceeded max total time
+            if time.time() - start_time > max_total_time:
+                logger.warning(f"web_search exceeded max time, stopping")
+                break
+
             try:
+                logger.info(f"web_search trying: {instance}")
                 # Use public SearXNG instance for search
                 search_url = urljoin(instance, "search")
 
@@ -1365,7 +1398,7 @@ class ToolManager:
                     "language": "en-US",
                 }
 
-                response = requests.get(search_url, params=params, timeout=15)
+                response = requests.get(search_url, params=params, timeout=8)
 
                 # Check if we got a successful response
                 if response.status_code == 200:
@@ -1387,28 +1420,36 @@ class ToolManager:
                                 url = result.get("url", "")
                                 results.append(f"• {title}: {content} ({url})")
 
+                            logger.info(f"web_search success: {instance} returned {len(data['results'])} results")
                             return "\n".join(results)
                         else:
+                            logger.info(f"web_search no results from {instance}")
                             # Try next instance
                             continue
                     except ValueError:
                         # JSON decode failed, try next instance
+                        logger.warning(f"web_search JSON decode failed from {instance}")
                         continue
                 else:
+                    logger.info(f"web_search HTTP {response.status_code} from {instance}")
                     # HTTP error, try next instance
                     continue
 
             except requests.exceptions.Timeout:
                 # Timeout, try next instance
+                logger.warning(f"web_search timeout from {instance}")
                 continue
             except requests.exceptions.RequestException:
                 # Other request error, try next instance
+                logger.warning(f"web_search request error from {instance}")
                 continue
             except Exception:
                 # Any other error, try next instance
+                logger.warning(f"web_search unknown error from {instance}")
                 continue
 
         # If all instances failed, try HTML parsing as fallback
+        logger.warning("web_search all instances failed, trying HTML fallback")
         return self._web_search_html_fallback(query, public_instances)
 
     def company_research(self, company_name: str) -> str:
@@ -1417,27 +1458,28 @@ class ToolManager:
             return "Rate limit exceeded. Please wait before making another search."
 
         # List of public SearXNG instances (fallback mechanism)
+        # Reduced list to speed up failover
         public_instances = [
             "https://searx.be",
             "https://metacat.online",
-            "https://nyc1.sx.ggtyler.dev",
             "https://ooglester.com",
-            "https://search.080609.xyz",
-            "https://search.canine.tools",
-            "https://search.catboy.house",
-            "https://search.citw.lgbt",
-            "https://search.einfachzocken.eu",
-            "https://search.federicociro.com",
-            "https://search.hbubli.cc",
-            "https://search.im-in.space",
-            "https://search.indst.eu",
         ]
 
         # Shuffle the instances for better distribution
         random.shuffle(public_instances)
 
+        # Set overall timeout to prevent hanging
+        import time
+        start_time = time.time()
+        max_total_time = 20  # Maximum 20 seconds total
+
         # Try each instance until one works
         for instance in public_instances:
+            # Check if we've exceeded max total time
+            if time.time() - start_time > max_total_time:
+                logger.warning(f"company_research exceeded max time, stopping")
+                break
+
             try:
                 # Use public SearXNG instance for company research
                 search_url = urljoin(instance, "search")
@@ -1451,7 +1493,7 @@ class ToolManager:
                     "language": "en-US",
                 }
 
-                response = requests.get(search_url, params=params, timeout=15)
+                response = requests.get(search_url, params=params, timeout=8)
 
                 # Check if we got a successful response
                 if response.status_code == 200:
@@ -2051,15 +2093,19 @@ class ToolManager:
             if self.discord_tools is None:
                 return "Discord tools not initialized. Bot may not be connected to Discord."
 
+            logger.info(f"discord_search_messages calling discord_tools.search_messages with channel_id={channel_id}, query='{query}', limit={limit}")
             result = await self.discord_tools.search_messages(
                 channel_id, query, author_id, limit
             )
+            logger.info(f"discord_search_messages received result: {str(result)[:500]}")
 
             if "error" in result:
+                logger.error(f"discord_search_messages error: {result['error']}")
                 return f"Error searching Discord messages: {result['error']}"
 
             messages = result["messages"]
             channel_info = result["channel"]
+            logger.info(f"discord_search_messages found {len(messages)} messages in #{channel_info['name']}")
             response = f"Search Results in Channel: #{channel_info['name']} ({channel_info['id']})\n"
             response += f"Guild: {channel_info['guild_name']}\n"
             response += f"Query: '{result['query']}'\n"
@@ -2168,6 +2214,8 @@ class ToolManager:
 
     def discord_get_user_roles(self, guild_id: Optional[str] = None) -> str:
         """Get roles for the currently logged-in user in a specific guild"""
+        logger.info(f"discord_get_user_roles called with guild_id={guild_id}")
+        
         if not self._check_rate_limit("discord_get_user_roles"):
             return "Rate limit exceeded for Discord user roles request."
 
@@ -2176,12 +2224,16 @@ class ToolManager:
                 return "Discord tools not initialized. Bot may not be connected to Discord."
 
             result = self.discord_tools.get_user_roles(guild_id)
+            logger.info(f"discord_get_user_roles result: {result}")
+            
             if "error" in result:
+                logger.error(f"discord_get_user_roles error: {result['error']}")
                 return f"Error getting Discord user roles: {result['error']}"
 
             user = result["user"]
             guild = result["guild"]
             roles = result["roles"]
+            logger.info(f"discord_get_user_roles: user={user['display_name']}, guild={guild['name']}, roles_count={len(roles)}")
 
             if not roles:
                 return f"User {user['display_name']} has no roles in guild '{guild['name']}' (ID: {guild['id']})."
@@ -2337,8 +2389,24 @@ class ToolManager:
         try:
             tool_func = self.tools[tool_name]
 
-            # For image generation, use thread pool to avoid blocking the event loop
-            if tool_name == "generate_image":
+            # Tools that make network requests and should run in thread pool to avoid blocking
+            blocking_tools = [
+                "web_search",
+                "crawling",
+                "company_research",
+                "get_crypto_price",
+                "get_stock_price",
+                "generate_image",
+                "analyze_image",
+                "check_balance",
+                "get_bonus_schedule",
+                "discord_search_messages",
+                "discord_read_channel",
+                "discord_list_guild_members",
+            ]
+
+            # Run blocking tools in thread pool to avoid event loop blocking
+            if tool_name in blocking_tools:
                 import asyncio
                 import functools
 

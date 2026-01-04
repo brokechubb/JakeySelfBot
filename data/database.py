@@ -428,6 +428,42 @@ class DatabaseManager:
 
         return count
 
+    def delete_old_memories(self, user_id: str, cutoff_date: str) -> int:
+        """Delete memories for a user older than a cutoff date and return the count of deleted memories.
+        If user_id is empty, deletes old memories for all users."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Count memories before deletion
+        if user_id:
+            cursor.execute(
+                "SELECT COUNT(*) FROM memories WHERE user_id = ? AND created_at < ?",
+                (user_id, cutoff_date),
+            )
+        else:
+            cursor.execute(
+                "SELECT COUNT(*) FROM memories WHERE created_at < ?",
+                (cutoff_date,),
+            )
+        count = cursor.fetchone()[0]
+
+        # Delete memories older than cutoff date
+        if user_id:
+            cursor.execute(
+                "DELETE FROM memories WHERE user_id = ? AND created_at < ?",
+                (user_id, cutoff_date),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM memories WHERE created_at < ?",
+                (cutoff_date,),
+            )
+
+        conn.commit()
+        conn.close()
+
+        return count
+
     def clear_user_history(self, user_id: str):
         """Clear conversation history for a user"""
         conn = sqlite3.connect(self.db_path)
@@ -592,6 +628,13 @@ class DatabaseManager:
         """Async version of delete_memories"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self._executor, self.delete_memories, user_id)
+
+    async def adelete_old_memories(self, user_id: str, cutoff_date: str) -> int:
+        """Async version of delete_old_memories"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            self._executor, self.delete_old_memories, user_id, cutoff_date
+        )
 
     async def aclear_channel_history(self, channel_id: str):
         """Async version of clear_channel_history"""

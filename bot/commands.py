@@ -744,6 +744,7 @@ def setup_commands(bot):
             if model_name in model_names:
                 # Set the current model
                 bot.current_model = model_name
+                logger.info(f"Model changed to: {model_name} (user: {ctx.author.id})")
                 # If switching back to a Pollinations model, cancel any pending restoration
                 if (
                     hasattr(bot, "current_api_provider")

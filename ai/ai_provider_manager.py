@@ -165,7 +165,8 @@ class SimpleAIProviderManager:
             providers_to_try.append(preferred_provider)
 
         # Add remaining providers in order of preference
-        for provider in ["pollinations", "openrouter"]:
+        # OpenRouter is now primary, Pollinations is fallback
+        for provider in ["openrouter", "pollinations"]:
             if provider not in providers_to_try:
                 providers_to_try.append(provider)
 
@@ -182,6 +183,7 @@ class SimpleAIProviderManager:
                     logger.debug(
                         f"🚀 Making direct Pollinations API call (attempt {attempt + 1})"
                     )
+                    logger.debug(f"📤 Model being used: {model}")
                     result = await asyncio.to_thread(
                         self.pollinations_api.generate_text,
                         messages=messages,

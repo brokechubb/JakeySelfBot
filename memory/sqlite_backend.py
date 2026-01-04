@@ -106,8 +106,20 @@ class SQLiteMemoryBackend(MemoryBackend):
             return False
 
     async def cleanup(self, max_age_days: int = 30) -> int:
-        """Clean up old entries (not supported in current SQLite implementation)"""
-        # SQLite memory table doesn't have timestamps
-        # Could be enhanced to support cleanup if schema is extended
-        logger.info("SQLite memory cleanup not implemented (no timestamps in schema)")
-        return 0
+        """Clean up old entries using timestamps in the database schema"""
+        try:
+            # Calculate the cutoff date
+            from datetime import datetime, timedelta
+            cutoff_date = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+
+            # Delete all memories older than the cutoff date for all users
+            # The database schema includes created_at and updated_at timestamps
+            total_deleted = 0
+            deleted_count = await self.db.adelete_old_memories("", cutoff_date)
+            total_deleted += deleted_count
+
+            logger.info(f"SQLite memory cleanup completed: deleted {total_deleted} entries older than {max_age_days} days")
+            return total_deleted
+        except Exception as e:
+            logger.error(f"SQLite memory cleanup failed: {e}")
+            return 0

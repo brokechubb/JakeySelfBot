@@ -280,39 +280,34 @@ class JakeyBot(commands.Bot):
                 logger.error(f"Failed to update model capabilities cache: {e}")
                 # Fallback to basic models if cache update fails (FREE MODELS ONLY)
                 model_key = model_name.strip().lower()
-                trusted_tool_models = ["evil", "openai", "gemini", "mistral"]
+                trusted_tool_models = ["evil", "openai", "openai-fast", "gemini", "gemini-search", "mistral", "deepseek", "qwen-coder", "roblox-rp"]
                 if model_key in trusted_tool_models:
                     return True
                 return model_key in [
-                    # Verified free OpenRouter models that support tools (as of 2024-11-11)
+                    # Pollinations models (these are the actual available models)
+                    "evil",
+                    "deepseek",
+                    "mistral",
+                    "openai",
+                    "openai-fast",
+                    "gemini",
+                    "gemini-search",
+                    "qwen-coder",
+                    "roblox-rp",
+                    # OpenRouter fallback models (verified free tier)
                     "nvidia/nemotron-nano-9b-v2:free",
-                    "deepseek/deepseek-chat-v3.1:free",
-                    "openai/gpt-oss-20b:free",
-                    "meituan/longcat-flash-chat:free",
-                    "qwen/qwen3-coder:free",
-                    "tencent/hunyuan-a13b-instruct:free",
-                    "mistralai/mistral-small-3.2-24b-instruct:free",
-                    "deepseek/deepseek-r1-0528-qwen3-8b:free",
-                    "deepseek/deepseek-r1-0528:free",
-                    "mistralai/devstral-small-2505:free",
-                    "meta-llama/llama-3.3-8b-instruct:free",
-                    "qwen/qwen3-4b:free",
-                    "qwen/qwen3-8b:free",
-                    "qwen/qwen3-14b:free",
-                    "tngtech/deepseek-r1t-chimera:free",
                     "deepseek/deepseek-r1:free",
                     "meta-llama/llama-3.3-70b-instruct:free",
-                    "qwen/qwen-2.5-coder-32b-instruct:free",
                     "meta-llama/llama-3.2-3b-instruct:free",
-                    "qwen/qwen-2.5-72b-instruct:free",
-                    "mistralai/mistral-nemo:free",
-                    "mistralai/mistral-7b-instruct:free",
+                    "mistralai/mistral-small-3.2-24b-instruct:free",
+                    "deepseek/deepseek-chat:free",
                 ]
 
         # Check if model supports tools from cache
         model_key = model_name.strip().lower()
         # Special case: Known models that support tools regardless of API data
-        trusted_tool_models = ["evil", "openai", "gemini", "mistral"]
+        # Updated with actual Pollinations models (Jan 2026)
+        trusted_tool_models = ["evil", "openai", "openai-fast", "gemini", "gemini-search", "mistral", "deepseek", "qwen-coder", "roblox-rp", "unity", "bidara"]
         if model_key in trusted_tool_models:
             logger.debug(f"Model '{model_key}' is in trusted tool models list")
             return True
@@ -360,44 +355,22 @@ class JakeyBot(commands.Bot):
         return model_lower in [
             "evil",
             "openai",
+            "openai-fast",
             "gemini",
+            "gemini-search",
             "mistral",
-            # Free OpenRouter models that support tools
+            "deepseek",
+            "qwen-coder",
+            "roblox-rp",
+            "unity",
+            "bidara",
+            # Free OpenRouter models that support tools (Jan 2026)
             "nvidia/nemotron-nano-9b-v2:free",
-            "deepseek/deepseek-chat-v3.1:free",
-            "openai/gpt-oss-20b:free",
-            "meituan/longcat-flash-chat:free",
-            "qwen/qwen3-coder:free",
-            "tencent/hunyuan-a13b-instruct:free",
-            "tngtech/deepseek-r1t2-chimera:free",
-            "mistralai/mistral-small-3.2-24b-instruct:free",
-            "deepseek/deepseek-r1-0528-qwen3-8b:free",
-            "deepseek/deepseek-r1-0528:free",
-            "mistralai/devstral-small-2505:free",
-            "meta-llama/llama-3.3-8b-instruct:free",
-            "qwen/qwen3-4b:free",
-            "qwen/qwen3-30b-a3b:free",
-            "qwen/qwen3-8b:free",
-            "qwen/qwen3-14b:free",
-            "qwen/qwen3-235b-a22b:free",
-            "tngtech/deepseek-r1t-chimera:free",
-            "shisa-ai/shisa-v2-llama3.3-70b:free",
-            "meta-llama/llama-4-maverick:free",
-            "meta-llama/llama-4-scout:free",
-            "qwen/qwen2.5-vl-32b-instruct:free",
-            "deepseek/deepseek-chat-v3-0324:free",
-            "mistralai/mistral-small-3.1-24b-instruct:free",
-            "nousresearch/deephermes-3-llama-3-8b-preview:free",
-            "qwen/qwen2.5-vl-72b-instruct:free",
-            "mistralai/mistral-small-24b-instruct-2501:free",
-            "deepseek/deepseek-r1-distill-llama-70b:free",
             "deepseek/deepseek-r1:free",
+            "deepseek/deepseek-chat:free",
             "meta-llama/llama-3.3-70b-instruct:free",
-            "qwen/qwen-2.5-coder-32b-instruct:free",
             "meta-llama/llama-3.2-3b-instruct:free",
-            "qwen/qwen-2.5-72b-instruct:free",
-            "mistralai/mistral-nemo:free",
-            "mistralai/mistral-7b-instruct:free",
+            "mistralai/mistral-small-3.2-24b-instruct:free",
         ]
 
     # Anti-Repetition Methods
@@ -830,6 +803,15 @@ class JakeyBot(commands.Bot):
             if memory_context:
                 system_content += f"\n\nUser Context (remembered from previous conversations):\n{memory_context}\n\nUse this context to personalized your response, but don't explicitly mention that you're remembering things."
 
+            # Add channel context if available
+            channel_context = await self.collect_recent_channel_context(
+                message, 
+                limit_minutes=CHANNEL_CONTEXT_MINUTES, 
+                message_limit=CHANNEL_CONTEXT_MESSAGE_LIMIT
+            )
+            if channel_context:
+                system_content += f"\n\n{channel_context}\n\nUse this channel context to understand what's being discussed."
+
             messages = [
                 {"role": "system", "content": system_content},
             ]
@@ -871,8 +853,10 @@ class JakeyBot(commands.Bot):
 
             available_tools = tool_manager.get_available_tools()
 
+            logger.debug(f"Generating AI response with model: {self.current_model}")
             response = await self._ai_manager.generate_text(
                 messages=valid_messages,
+                model=self.current_model,
                 temperature=0.7,
                 max_tokens=500,
                 tools=available_tools,
@@ -913,12 +897,23 @@ class JakeyBot(commands.Bot):
                             else:
                                 arguments = args
 
+                            # Handle special "current" channel_id for Discord tools
+                            # Convert "current" to the actual channel ID from the message context
+                            channel_id_arg_names = ["channel_id", "channel"]
+                            for arg_name in channel_id_arg_names:
+                                if arg_name in arguments and arguments[arg_name] == "current":
+                                    arguments[arg_name] = str(message.channel.id)
+                                    logger.info(f"Replaced 'current' channel_id with actual ID: {arguments[arg_name]}")
+
                             # Execute the tool
                             logger.info(
                                 f"Executing tool: {function_name} with args: {arguments}"
                             )
                             result = await tool_manager.execute_tool(
                                 function_name, arguments, str(message.author.id)
+                            )
+                            logger.info(
+                                f"Tool result: {function_name} -> {str(result)[:200]}"
                             )
 
                             # Add tool response
@@ -953,10 +948,18 @@ class JakeyBot(commands.Bot):
                         # Add tool responses to the conversation
                         valid_messages.extend(tool_messages)
 
+                        logger.info(
+                            f"Making follow-up AI call with {len(tool_messages)} tool results"
+                        )
+
                         # Get the final response from AI based on tool results
                         final_response = await self._ai_manager.generate_text(
-                            messages=valid_messages, temperature=0.7, max_tokens=500
+                            messages=valid_messages,
+                            model=self.current_model,
+                            temperature=0.7,
+                            max_tokens=500
                         )
+                        logger.info(f"Follow-up AI response received: {str(final_response)[:200]}")
 
                         if final_response.get("error"):
                             logger.error(
@@ -1121,6 +1124,62 @@ class JakeyBot(commands.Bot):
 
             except Exception as e:
                 logger.error(f"Error in periodic memory cleanup: {e}")
+
+    async def collect_recent_channel_context(
+        self, message, limit_minutes: int = 30, message_limit: int = 10
+    ) -> str:
+        """
+        Collect recent channel messages for context.
+        
+        Args:
+            message: The Discord message object
+            limit_minutes: How far back to look (default: 30 minutes)
+            message_limit: Maximum number of messages to include (default: 10)
+            
+        Returns:
+            Formatted string of recent channel messages, or empty string for DMs
+        """
+        try:
+            # Return empty for DM channels (no guild)
+            if not message.guild:
+                return ""
+            
+            channel = message.channel
+            if not hasattr(channel, 'history'):
+                return ""
+            
+            # Calculate cutoff time
+            from datetime import datetime, timedelta, timezone
+            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=limit_minutes)
+            
+            # Collect messages
+            messages = []
+            async for msg in channel.history(limit=message_limit, after=cutoff_time):
+                # Skip system messages and the current message
+                if msg.type != discord.MessageType.default:
+                    continue
+                if msg.author == self.user:
+                    continue
+                if msg.id == message.id:
+                    continue
+                    
+                # Format the message
+                timestamp = msg.created_at.strftime("%H:%M")
+                author_name = msg.author.name
+                content = msg.content[:200]  # Truncate long messages
+                messages.append(f"[{timestamp}] {author_name}: {content}")
+            
+            if not messages:
+                return ""
+            
+            # Format as context
+            context = "\nRecent channel conversation:\n" + "\n".join(messages)
+            logger.debug(f"Collected {len(messages)} messages for channel context")
+            return context
+            
+        except Exception as e:
+            logger.debug(f"Could not collect channel context: {e}")
+            return ""
 
     async def process_webhook_relay(self, message):
         """Process webhook relay for incoming messages"""
@@ -2135,8 +2194,13 @@ class JakeyBot(commands.Bot):
                 {"role": "user", "content": custom_prompt},
             ]
 
-            response = await asyncio.to_thread(
-                self.pollinations_api.generate_text,
+            # Use the AI provider manager for automatic failover
+            from ai.ai_provider_manager import SimpleAIProviderManager
+
+            if not hasattr(self, "_ai_manager"):
+                self._ai_manager = SimpleAIProviderManager()
+
+            response = await self._ai_manager.generate_text(
                 messages=messages,
                 model=self.current_model,
                 max_tokens=200,
