@@ -1,85 +1,96 @@
-"""Test backward compatibility of enhanced pollinations implementation"""
+"""Test backward compatibility of AI implementations
+
+NOTE: Pollinations API has been deprecated and removed.
+This module now tests OpenRouter API compatibility instead.
+"""
 import sys
 import os
+import unittest
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from ai.pollinations import pollinations_api
+# Try to import Pollinations, skip if not available (deprecated)
+try:
+    from ai.pollinations import pollinations_api
+    POLLINATIONS_AVAILABLE = True
+except ImportError:
+    POLLINATIONS_AVAILABLE = False
+    pollinations_api = None
+
+from ai.openrouter import openrouter_api
 
 
-def test_basic_text_generation():
-    """Test basic text generation (backward compatibility)"""
-    print("Testing basic text generation...")
+@unittest.skipUnless(POLLINATIONS_AVAILABLE, "Pollinations API has been deprecated and removed")
+class TestPollinationsBackwardCompatibility(unittest.TestCase):
+    """Test backward compatibility of Pollinations API (DEPRECATED)"""
     
-    messages = [
-        {"role": "user", "content": "What is 2+2?"}
-    ]
+    def test_basic_text_generation(self):
+        """Test basic text generation (backward compatibility)"""
+        messages = [{"role": "user", "content": "What is 2+2?"}]
+        response = pollinations_api.generate_text(messages=messages)
+        self.assertIsInstance(response, dict)
     
-    response = pollinations_api.generate_text(messages=messages)
-    print(f"Response: {response}")
+    def test_basic_image_generation(self):
+        """Test basic image generation (backward compatibility)"""
+        url = pollinations_api.generate_image("A cat")
+        self.assertIsNotNone(url)
+        self.assertIsInstance(url, str)
     
-    # Even if there's an API error, the function should still return a dict with error key
-    if isinstance(response, dict):
-        print("Success: Basic text generation interface works")
-        return True
-    else:
-        print("Error: Basic text generation interface broken")
-        return False
+    def test_model_listing(self):
+        """Test model listing (backward compatibility)"""
+        text_models = pollinations_api.list_text_models()
+        image_models = pollinations_api.list_image_models()
+        self.assertIsInstance(text_models, list)
+        self.assertIsInstance(image_models, list)
 
 
-def test_basic_image_generation():
-    """Test basic image generation (backward compatibility)"""
-    print("Testing basic image generation...")
+class TestOpenRouterBackwardCompatibility(unittest.TestCase):
+    """Test backward compatibility of OpenRouter API (current primary provider)"""
     
-    url = pollinations_api.generate_image("A cat")
-    print(f"Image URL: {url}")
+    def test_api_initialization(self):
+        """Test that OpenRouter API initializes correctly"""
+        self.assertIsNotNone(openrouter_api)
+        self.assertIsNotNone(openrouter_api.api_url)
+        self.assertIsNotNone(openrouter_api.default_model)
     
-    if url and isinstance(url, str):
-        print("Success: Basic image generation interface works")
-        return True
-    else:
-        print("Error: Basic image generation interface broken")
-        return False
-
-
-def test_model_listing():
-    """Test model listing (backward compatibility)"""
-    print("Testing model listing...")
+    def test_generate_text_interface(self):
+        """Test that generate_text has the expected interface"""
+        self.assertTrue(callable(openrouter_api.generate_text))
+        # Check it accepts the expected parameters
+        import inspect
+        sig = inspect.signature(openrouter_api.generate_text)
+        param_names = list(sig.parameters.keys())
+        self.assertIn('messages', param_names)
+        self.assertIn('model', param_names)
+        self.assertIn('temperature', param_names)
+        self.assertIn('max_tokens', param_names)
     
-    text_models = pollinations_api.list_text_models()
-    image_models = pollinations_api.list_image_models()
+    def test_list_models_interface(self):
+        """Test that list_models has the expected interface"""
+        self.assertTrue(callable(openrouter_api.list_models))
     
-    print(f"Text models: {text_models}")
-    print(f"Image models: {image_models}")
-    
-    # Should return lists (even if empty due to API issues)
-    if isinstance(text_models, list) and isinstance(image_models, list):
-        print("Success: Model listing interface works")
-        return True
-    else:
-        print("Error: Model listing interface broken")
-        return False
+    def test_check_service_health_interface(self):
+        """Test that check_service_health has the expected interface"""
+        self.assertTrue(callable(openrouter_api.check_service_health))
 
 
 def main():
     """Run backward compatibility tests"""
     print("Running backward compatibility tests...")
     
-    try:
-        text_success = test_basic_text_generation()
-        image_success = test_basic_image_generation()
-        model_success = test_model_listing()
-        
-        if text_success and image_success and model_success:
-            print("All backward compatibility tests passed!")
-            return True
-        else:
-            print("Some backward compatibility tests failed!")
-            return False
-    except Exception as e:
-        print(f"Test failed with exception: {e}")
-        return False
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+    
+    # Add test classes
+    suite.addTests(loader.loadTestsFromTestCase(TestPollinationsBackwardCompatibility))
+    suite.addTests(loader.loadTestsFromTestCase(TestOpenRouterBackwardCompatibility))
+    
+    # Run tests
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+    
+    return result.wasSuccessful()
 
 
 if __name__ == "__main__":

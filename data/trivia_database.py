@@ -149,7 +149,7 @@ class TriviaDatabase:
             finally:
                 conn.close()
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _add_category
         )
 
@@ -180,7 +180,7 @@ class TriviaDatabase:
                 }
             return None
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _get_category
         )
 
@@ -209,7 +209,7 @@ class TriviaDatabase:
                 for row in results
             ]
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _get_categories
         )
 
@@ -288,7 +288,7 @@ class TriviaDatabase:
             finally:
                 conn.close()
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _add_question
         )
 
@@ -391,7 +391,7 @@ class TriviaDatabase:
             finally:
                 conn.close()
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _add_or_update_question
         )
 
@@ -457,7 +457,7 @@ class TriviaDatabase:
             conn.close()
             return result[0] if result else None
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _find_answer
         )
 
@@ -497,7 +497,7 @@ class TriviaDatabase:
                 for row in results
             ]
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _get_questions
         )
 
@@ -538,7 +538,7 @@ class TriviaDatabase:
             conn.commit()
             conn.close()
 
-        await asyncio.get_event_loop().run_in_executor(self._executor, _record_attempt)
+        await asyncio.get_running_loop().run_in_executor(self._executor, _record_attempt)
 
     async def get_category_stats(self, category_name: str) -> Dict:
         """Get statistics for a specific category"""
@@ -577,7 +577,7 @@ class TriviaDatabase:
                 "accuracy_rate": 0,
             }
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _get_stats
         )
 
@@ -602,7 +602,7 @@ class TriviaDatabase:
             conn.commit()
             conn.close()
 
-        await asyncio.get_event_loop().run_in_executor(self._executor, _cache_questions)
+        await asyncio.get_running_loop().run_in_executor(self._executor, _cache_questions)
 
     async def get_cached_questions(self, category_name: str) -> Optional[List[Dict]]:
         """Get cached questions for a category"""
@@ -627,7 +627,7 @@ class TriviaDatabase:
                     return None
             return None
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _get_cached
         )
 
@@ -714,7 +714,7 @@ class TriviaDatabase:
             finally:
                 conn.close()
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _bulk_import
         )
 
@@ -759,7 +759,7 @@ class TriviaDatabase:
                 for row in results
             ]
 
-        return await asyncio.get_event_loop().run_in_executor(self._executor, _search)
+        return await asyncio.get_running_loop().run_in_executor(self._executor, _search)
 
     async def get_database_stats(self) -> Dict:
         """Get overall database statistics"""
@@ -803,7 +803,7 @@ class TriviaDatabase:
                 ],
             }
 
-        return await asyncio.get_event_loop().run_in_executor(
+        return await asyncio.get_running_loop().run_in_executor(
             self._executor, _get_stats
         )
 

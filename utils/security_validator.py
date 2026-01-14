@@ -56,8 +56,10 @@ class SecurityValidator:
     # Shell redirection patterns (separate from general dangerous patterns)
     SHELL_REDIRECTION_PATTERNS = [
         r'<\s*\w+',        # Input redirection with files (but allow Discord mentions)
-        r'>\s*\w+',        # Output redirection to files
         r'>>\s*\w+',       # Append redirection to files
+        # More specific output redirection pattern - require file-like context
+        r'(?:echo|cat|ls|printf|print)\s+[^>]*>\s*\w+',  # Command followed by > and word
+        r'(?:>|>>)\s*(?:\/|[a-zA-Z]:\\|tmp|var|home|usr|opt)\S*',  # > followed by path-like patterns
     ]
     
     # SQL injection patterns

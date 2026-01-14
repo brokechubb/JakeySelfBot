@@ -241,7 +241,7 @@ class MCPMemoryClient:
             "user_id": user_id,
             "information_type": information_type,
             "information": information,
-            "timestamp": asyncio.get_event_loop().time(),
+            "timestamp": asyncio.get_running_loop().time(),
         }
 
         result = await self._make_request("memories", method="POST", data=data)

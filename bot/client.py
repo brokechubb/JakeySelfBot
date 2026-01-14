@@ -1,13 +1,9 @@
 import asyncio
 import json
 import logging
-import math
-import operator
 import random
 import re
-import threading
 import time
-from collections import deque
 from random import randint, uniform
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, unquote
@@ -18,11 +14,8 @@ from discord import DMChannel, GroupChannel, TextChannel, Thread
 from discord.ext import commands
 from discord.ext.commands.view import StringView
 
-from ai.anti_repetition_integrator import anti_repetition_integrator
+from ai.ai_provider_manager import ai_provider_manager
 from ai.openrouter import openrouter_api
-from ai.pollinations import pollinations_api
-
-# Import response uniqueness system
 from ai.response_uniqueness import response_uniqueness
 
 # Import admin check function
@@ -31,6 +24,88 @@ from bot.commands import is_admin
 # Import phrase sanitization utilities
 from utils.phrase_sanitizer import clean_phrase_comprehensive
 
+# Setup logger
+logger = logging.getLogger(__name__)
+
+# Pre-compiled regex patterns for performance
+# Tool call detection patterns
+TOOL_CALL_JSON_PATTERN = re.compile(
+    r'\{"type"\s*:\s*"function"\s*,\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[^\}]+\})\}',
+    re.DOTALL,
+)
+# Wen command pattern
+WEN_PATTERN = re.compile(r"\b(wen+\?+)$", re.IGNORECASE)
+# Path sanitization pattern
+PATH_PATTERN = re.compile(r"[/\\][a-zA-Z0-9_\-/\\.]+")
+# Database URL sanitization pattern
+DB_URL_PATTERN = re.compile(r"(sqlite:///[^\s]+|mysql://[^\s]+|postgresql://[^\s]+)")
+# Tool call syntax patterns for sanitization
+TOOL_CALLS_PATTERN = re.compile(r"\[TOOL_CALL[S]?\].*", re.DOTALL | re.IGNORECASE)
+TOOL_CALL_TAG_PATTERN = re.compile(r"</?tool_call>.*", re.DOTALL | re.IGNORECASE)
+FUNCTION_CALL_TAG_PATTERN = re.compile(
+    r"</?function_call>.*", re.DOTALL | re.IGNORECASE
+)
+RAW_FUNCTION_PATTERN = re.compile(r"\b[a-z_]+\s*\{[^}]*\}", re.IGNORECASE)
+DISCORD_FUNCTION_PATTERN = re.compile(
+    r"\bdiscord_\w+\s*\{.*?\}", re.DOTALL | re.IGNORECASE
+)
+WEB_SEARCH_FUNCTION_PATTERN = re.compile(
+    r"\bweb_search\s*\{.*?\}", re.DOTALL | re.IGNORECASE
+)
+GET_FUNCTION_PATTERN = re.compile(r"\bget_\w+\s*\{.*?\}", re.DOTALL | re.IGNORECASE)
+REMEMBER_FUNCTION_PATTERN = re.compile(
+    r"\bremember_\w+\s*\{.*?\}", re.DOTALL | re.IGNORECASE
+)
+SEARCH_FUNCTION_PATTERN = re.compile(
+    r"\bsearch_\w+\s*\{.*?\}", re.DOTALL | re.IGNORECASE
+)
+JSON_TOOL_CALL_PATTERN = re.compile(
+    r'\{[^}]*["\']type["\']\s*:\s*["\']function["\'][^{]*(?:\{[^}]*\})?[^}]*\}',
+    re.DOTALL | re.IGNORECASE,
+)
+END_TOKEN_PATTERN = re.compile(r"</s>\s*$")
+MULTIPLE_NEWLINES_PATTERN = re.compile(r"\n\s*\n\s*\n")
+
+
+def extract_text_tool_calls(ai_response: str) -> Tuple[List[Dict], str]:
+    """
+    Extract tool calls from AI response text when model returns them as JSON instead of API format.
+
+    Args:
+        ai_response: The AI response text to check for embedded tool calls
+
+    Returns:
+        Tuple of (tool_calls list, cleaned response text)
+    """
+    if not ai_response:
+        return [], ai_response
+
+    match = TOOL_CALL_JSON_PATTERN.search(ai_response)
+    if not match:
+        return [], ai_response
+
+    try:
+        function_name = match.group(1)
+        parameters_str = match.group(2)
+        parameters = json.loads(parameters_str)
+
+        tool_calls = [
+            {
+                "id": f"manual_{int(time.time())}",
+                "type": "function",
+                "function": {"name": function_name, "arguments": parameters},
+            }
+        ]
+
+        # Remove the JSON from response
+        cleaned_response = TOOL_CALL_JSON_PATTERN.sub("", ai_response).strip()
+
+        return tool_calls, cleaned_response
+
+    except json.JSONDecodeError as e:
+        logging.getLogger(__name__).debug(f"Failed to parse tool call JSON: {e}")
+        return [], ai_response
+
 
 # Error handling functions
 def sanitize_error_message(error_message: str) -> str:
@@ -38,43 +113,185 @@ def sanitize_error_message(error_message: str) -> str:
     if not error_message:
         return "An error occurred"
 
-    import re
-
-    sanitized = re.sub(r"[/\\][a-zA-Z0-9_\-/\\\.]+", "[PATH]", error_message)
-    sanitized = re.sub(
-        r"(sqlite:///[^\s]+|mysql://[^\s]+|postgresql://[^\s]+)",
-        "[DATABASE]",
-        sanitized,
-    )
+    sanitized = PATH_PATTERN.sub("[PATH]", error_message)
+    sanitized = DB_URL_PATTERN.sub("[DATABASE]", sanitized)
+    return sanitized
 
 
 def sanitize_ai_response(response: str) -> str:
     """
     Remove leaked tool call syntax from AI responses before sending to Discord.
-    
-    Some AI models output raw tool call syntax like [TOOL_CALLS]function{...} 
+
+    Some AI models output raw tool call syntax like [TOOL_CALLS]function{...}
     instead of using proper API tool call format. This strips that text.
+    
+    NOTE: We intentionally do NOT strip URLs - image generation tools return URLs
+    that need to be included in the response for Discord to embed them.
     """
     if not response:
         return response
-    
-    import re
-    
+
+    sanitized = response
+
     # Remove [TOOL_CALLS] or similar patterns followed by function calls
-    # Pattern matches: [TOOL_CALLS]function_name{...} or [TOOL_CALL]function_name{...}
-    sanitized = re.sub(r'\[TOOL_CALL[S]?\].*', '', response, flags=re.DOTALL | re.IGNORECASE)
-    
+    sanitized = TOOL_CALLS_PATTERN.sub("", sanitized)
+
     # Also handle other common formats like <tool_call>, </s>, etc.
-    sanitized = re.sub(r'</?tool_call>.*', '', sanitized, flags=re.DOTALL | re.IGNORECASE)
-    sanitized = re.sub(r'</?function_call>.*', '', sanitized, flags=re.DOTALL | re.IGNORECASE)
-    
+    sanitized = TOOL_CALL_TAG_PATTERN.sub("", sanitized)
+    sanitized = FUNCTION_CALL_TAG_PATTERN.sub("", sanitized)
+
+    # Remove raw function call patterns like: function_name{"arg": "value"} or function_name{...}
+    sanitized = RAW_FUNCTION_PATTERN.sub("", sanitized)
+
+    # Remove patterns like: discord_send_message{...} even with complex JSON
+    sanitized = DISCORD_FUNCTION_PATTERN.sub("", sanitized)
+    sanitized = WEB_SEARCH_FUNCTION_PATTERN.sub("", sanitized)
+    sanitized = GET_FUNCTION_PATTERN.sub("", sanitized)
+    sanitized = REMEMBER_FUNCTION_PATTERN.sub("", sanitized)
+    sanitized = SEARCH_FUNCTION_PATTERN.sub("", sanitized)
+
+    # Remove JSON-formatted tool calls: {"type": "function", "name": "...", "parameters": {...}}
+    sanitized = JSON_TOOL_CALL_PATTERN.sub("", sanitized)
+
     # Remove trailing </s> tokens some models add
-    sanitized = re.sub(r'</s>\s*$', '', sanitized)
-    
-    # Clean up any trailing whitespace
+    sanitized = END_TOKEN_PATTERN.sub("", sanitized)
+
+    # Clean up multiple newlines and whitespace
+    sanitized = MULTIPLE_NEWLINES_PATTERN.sub("\n\n", sanitized)
     sanitized = sanitized.strip()
-    
+
+    # Log if we removed significant content
+    if len(response) - len(sanitized) > 20:
+        logger.info(
+            f"Sanitized AI response: removed {len(response) - len(sanitized)} chars of tool call syntax"
+        )
+
     return sanitized
+
+
+def extract_final_response_from_reasoning(reasoning: str) -> str:
+    """
+    Extract the actual user-facing response from a model's reasoning/thinking output.
+
+    Many reasoning models output chain-of-thought that includes internal thinking
+    followed by the actual response. This function tries to extract just the final response.
+
+    Common patterns:
+    - "Final answer: ..." or "Final response: ..."
+    - "Response: ..." or "Answer: ..."
+    - "I'll respond with: ..."
+    - Text after "---" or "===" dividers
+    - Last paragraph after internal deliberation
+    """
+    if not reasoning:
+        return ""
+
+    # Try to find explicit response markers (case insensitive)
+    response_patterns = [
+        r"(?:^|\n)\s*(?:Final )?[Rr]esponse\s*:\s*(.+?)$",
+        r"(?:^|\n)\s*(?:Final )?[Aa]nswer\s*:\s*(.+?)$",
+        r"(?:^|\n)\s*(?:My )?[Rr]eply\s*:\s*(.+?)$",
+        r'(?:^|\n)\s*I(?:\'ll| will) (?:respond|reply|say)\s*:\s*["\']?(.+?)["\']?\s*$',
+        r'(?:^|\n)\s*(?:So,? )?(?:I(?:\'ll| will| should) )?(?:just )?(?:say|respond|reply)\s*:\s*["\']?(.+?)["\']?\s*$',
+    ]
+
+    for pattern in response_patterns:
+        match = re.search(pattern, reasoning, re.DOTALL | re.MULTILINE)
+        if match:
+            response = match.group(1).strip()
+            if response:
+                return response
+
+    # Try to find content after dividers like "---" or "==="
+    divider_patterns = [r"\n-{3,}\n(.+?)$", r"\n={3,}\n(.+?)$", r"\n\*{3,}\n(.+?)$"]
+    for pattern in divider_patterns:
+        match = re.search(pattern, reasoning, re.DOTALL)
+        if match:
+            response = match.group(1).strip()
+            if response and len(response) > 20:  # Reasonable length check
+                return response
+
+    # Look for quoted response at the end
+    quoted_match = re.search(r'["\']([^"\']{20,})["\']\s*$', reasoning)
+    if quoted_match:
+        return quoted_match.group(1).strip()
+
+    # If reasoning contains clear thinking markers, try to get content after them
+    thinking_end_patterns = [
+        r"(?:Let me|I\'ll|I will|I should|Now I\'ll|So I\'ll)\s+(?:respond|reply|answer|say)[^.]*\.\s*(.+?)$",
+    ]
+    for pattern in thinking_end_patterns:
+        match = re.search(pattern, reasoning, re.DOTALL | re.IGNORECASE)
+        if match:
+            response = match.group(1).strip()
+            if response and len(response) > 10:
+                return response
+
+    # Look for "Therefore", "So", "In conclusion", "The answer is" patterns
+    conclusion_patterns = [
+        r"(?:Therefore|So|Thus|Hence|In conclusion|The (?:answer|response) is|Based on this):?\s*(.+?)(?:\n|$)",
+        r"(?:Therefore|So|Thus|Hence|In conclusion|The (?:answer|response) is|Based on this):?\s*(.+?)(?:\n[A-Z]|\n\n|$)",
+        r".*\n\n(.+?)(?:\n|$)",  # Last paragraph after double newline
+    ]
+    for pattern in conclusion_patterns:
+        match = re.search(pattern, reasoning, re.DOTALL | re.IGNORECASE)
+        if match:
+            response = match.group(1).strip()
+            if response and len(response) > 10:
+                # Avoid returning just thinking/analysis
+                thinking_indicators = [
+                    "let me",
+                    "i need to",
+                    "i should",
+                    "first,",
+                    "step 1",
+                    "let's",
+                    "we need to",
+                    "we should",
+                    "analyzing",
+                    "parsing",
+                    "considering",
+                    "the user",
+                    "the request",
+                    "this means",
+                    "this is",
+                ]
+                if not any(ind in response.lower() for ind in thinking_indicators):
+                    return response
+
+    # Last resort: if it's short enough and doesn't look like thinking, use as-is
+    # Chain-of-thought usually has phrases like "Let me", "I need to", "First,", etc.
+    thinking_indicators = [
+        "let me",
+        "i need to",
+        "i should",
+        "first,",
+        "step 1",
+        "let's",
+        "we need to",
+        "we should",
+        "analyzing",
+        "parsing",
+        "considering",
+        "the user",
+        "the request",
+        "this means",
+        "this is",
+    ]
+
+    reasoning_lower = reasoning.lower()
+    has_thinking_indicators = any(ind in reasoning_lower for ind in thinking_indicators)
+
+    # If short and no clear thinking markers, might be the actual response
+    if len(reasoning) < 500 and not has_thinking_indicators:
+        return reasoning.strip()
+
+    # If we get here, the reasoning is likely pure chain-of-thought with no clear answer
+    # Return empty to indicate we couldn't extract a clean response
+    logger.warning(
+        f"Could not extract final response from reasoning (len={len(reasoning)})"
+    )
+    return ""
 
 
 def handle_command_error(error: Exception, ctx, command_name: str) -> str:
@@ -129,16 +346,9 @@ from config import (
     WELCOME_ENABLED,
     WELCOME_SERVER_IDS,
 )
-from data.database import db
 from media.image_generator import image_generator
-from tools.tool_manager import tool_manager
-from utils.gender_roles import get_user_pronouns
-from utils.helpers import send_long_message
 
-# Configure logging with colored output
-from utils.logging_config import get_logger
-
-logger = get_logger(__name__)
+# Constants for repetitive response detection
 
 
 # Constants
@@ -166,7 +376,7 @@ class JakeyBot(commands.Bot):
         self._connection.heartbeat_timeout = 60.0
 
         # Inject dependencies
-        self.pollinations_api = dependencies.ai_client
+        self.openrouter_api = dependencies.ai_client
         self.db = dependencies.database
         self.tool_manager = dependencies.tool_manager
         self.image_generator = image_generator  # Keep global for now
@@ -179,7 +389,7 @@ class JakeyBot(commands.Bot):
         # Current model (defaults to the configured default model)
         self.current_model = None  # Will be set to DEFAULT_MODEL when bot is ready
         self.current_api_provider = (
-            None  # Track which API provider is being used (pollinations/openrouter)
+            None  # Track which API provider is being used (openrouter only now)
         )
 
         # Fallback restoration tracking
@@ -197,7 +407,7 @@ class JakeyBot(commands.Bot):
         self.rate_limit_cooldown = RATE_LIMIT_COOLDOWN
         self._user_request_counts = {}  # user_id -> request_count (for current window)
         self._user_window_starts = {}  # user_id -> window_start_timestamp
-        self._user_lock = threading.Lock()
+        self._user_lock = None  # Lazy-initialized asyncio.Lock (can't create before event loop)
 
         # Global response limiting to prevent Discord rate limit issues
         self._last_global_response = 0
@@ -208,6 +418,7 @@ class JakeyBot(commands.Bot):
         # Wen command cooldown to prevent loops
         self.wen_cooldown = {}  # message_id -> timestamp
         self.wen_cooldown_duration = 600  # seconds (10 minutes)
+        self._last_wen_cleanup = 0  # timestamp of last cleanup
 
         # Model capabilities cache for dynamic tool support checking
         self._model_capabilities = {}  # model_name -> capabilities_dict
@@ -221,6 +432,54 @@ class JakeyBot(commands.Bot):
 
         initialize_gender_role_manager(self)
         self._model_cache_duration = 3600  # cache for 1 hour
+
+    def _get_user_lock(self) -> asyncio.Lock:
+        """Get or create the user rate limit lock (lazy initialization)."""
+        if self._user_lock is None:
+            self._user_lock = asyncio.Lock()
+        return self._user_lock
+
+    async def _check_user_rate_limit(self, user_id: str) -> tuple:
+        """
+        Check if a user is rate limited.
+        Returns (is_limited, time_remaining_seconds).
+        
+        Uses a sliding window: user_rate_limit requests per rate_limit_cooldown seconds.
+        """
+        current_time = time.time()
+        
+        async with self._get_user_lock():
+            # Get or initialize user's window
+            window_start = self._user_window_starts.get(user_id, 0)
+            request_count = self._user_request_counts.get(user_id, 0)
+            
+            # Check if window has expired
+            if current_time - window_start >= self.rate_limit_cooldown:
+                # Reset window
+                self._user_window_starts[user_id] = current_time
+                self._user_request_counts[user_id] = 0
+                return (False, 0)
+            
+            # Check if user exceeded limit
+            if request_count >= self.user_rate_limit:
+                time_remaining = self.rate_limit_cooldown - (current_time - window_start)
+                return (True, max(0, time_remaining))
+            
+            return (False, 0)
+    
+    async def _increment_user_request(self, user_id: str):
+        """Increment the request count for a user."""
+        current_time = time.time()
+        
+        async with self._get_user_lock():
+            window_start = self._user_window_starts.get(user_id, 0)
+            
+            # Reset if window expired
+            if current_time - window_start >= self.rate_limit_cooldown:
+                self._user_window_starts[user_id] = current_time
+                self._user_request_counts[user_id] = 1
+            else:
+                self._user_request_counts[user_id] = self._user_request_counts.get(user_id, 0) + 1
 
     def clear_model_cache(self):
         """Force clear the model capabilities cache"""
@@ -243,34 +502,16 @@ class JakeyBot(commands.Bot):
             try:
                 self._model_capabilities = {}
 
-                # Get models from Pollinations
-                try:
-                    pollinations_models = self.pollinations_api.list_text_models()
-                    for model in pollinations_models:
-                        if isinstance(model, dict) and "name" in model:
-                            self._model_capabilities[model["name"]] = {
-                                "provider": "pollinations",
-                                **model,
-                            }
-                        elif isinstance(model, str):
-                            self._model_capabilities[model] = {
-                                "provider": "pollinations",
-                                "name": model,
-                            }
-                except Exception as e:
-                    logger.warning(f"Failed to fetch Pollinations models: {e}")
-
                 # Get models from OpenRouter
-                if openrouter_api.enabled:
-                    try:
-                        openrouter_models = openrouter_api.list_models()
-                        for model_id in openrouter_models:
-                            self._model_capabilities[model_id] = {
-                                "provider": "openrouter",
-                                "name": model_id,
-                            }
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch OpenRouter models: {e}")
+                try:
+                    openrouter_models = openrouter_api.list_models()
+                    for model_id in openrouter_models:
+                        self._model_capabilities[model_id] = {
+                            "provider": "openrouter",
+                            "name": model_id,
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch OpenRouter models: {e}")
 
                 self._model_cache_time = current_time
                 logger.info(
@@ -278,23 +519,9 @@ class JakeyBot(commands.Bot):
                 )
             except Exception as e:
                 logger.error(f"Failed to update model capabilities cache: {e}")
-                # Fallback to basic models if cache update fails (FREE MODELS ONLY)
+                # Fallback to basic models (OpenRouter free models only)
                 model_key = model_name.strip().lower()
-                trusted_tool_models = ["evil", "openai", "openai-fast", "gemini", "gemini-search", "mistral", "deepseek", "qwen-coder", "roblox-rp"]
-                if model_key in trusted_tool_models:
-                    return True
                 return model_key in [
-                    # Pollinations models (these are the actual available models)
-                    "evil",
-                    "deepseek",
-                    "mistral",
-                    "openai",
-                    "openai-fast",
-                    "gemini",
-                    "gemini-search",
-                    "qwen-coder",
-                    "roblox-rp",
-                    # OpenRouter fallback models (verified free tier)
                     "nvidia/nemotron-nano-9b-v2:free",
                     "deepseek/deepseek-r1:free",
                     "meta-llama/llama-3.3-70b-instruct:free",
@@ -307,7 +534,19 @@ class JakeyBot(commands.Bot):
         model_key = model_name.strip().lower()
         # Special case: Known models that support tools regardless of API data
         # Updated with actual Pollinations models (Jan 2026)
-        trusted_tool_models = ["evil", "openai", "openai-fast", "gemini", "gemini-search", "mistral", "deepseek", "qwen-coder", "roblox-rp", "unity", "bidara"]
+        trusted_tool_models = [
+            "evil",
+            "openai",
+            "openai-fast",
+            "gemini",
+            "gemini-search",
+            "mistral",
+            "deepseek",
+            "qwen-coder",
+            "roblox-rp",
+            "unity",
+            "bidara",
+        ]
         if model_key in trusted_tool_models:
             logger.debug(f"Model '{model_key}' is in trusted tool models list")
             return True
@@ -351,20 +590,8 @@ class JakeyBot(commands.Bot):
         if any(keyword in model_lower for keyword in tool_capable_keywords):
             return True
 
-        # Final hardcoded fallback (FREE MODELS ONLY)
+        # Final hardcoded fallback (OpenRouter free models only)
         return model_lower in [
-            "evil",
-            "openai",
-            "openai-fast",
-            "gemini",
-            "gemini-search",
-            "mistral",
-            "deepseek",
-            "qwen-coder",
-            "roblox-rp",
-            "unity",
-            "bidara",
-            # Free OpenRouter models that support tools (Jan 2026)
             "nvidia/nemotron-nano-9b-v2:free",
             "deepseek/deepseek-r1:free",
             "deepseek/deepseek-chat:free",
@@ -378,79 +605,353 @@ class JakeyBot(commands.Bot):
         self, response_text: str, user_id: str
     ) -> Tuple[bool, str]:
         """
-        Check if a response is repetitive based on user's recent responses.
+        Wrapper for response_uniqueness.is_repetitive_response.
+        Check if a response is repetitive based on the bot's recent responses to this user.
         Returns a tuple of (is_repetitive, reason).
         """
-        # Skip checking for very short responses
-        if len(response_text.strip().split()) < 3:
-            return False, ""
+        # Delegate to the response_uniqueness manager for consistency
+        return response_uniqueness.is_repetitive_response(user_id, response_text)
 
-        # Check for exact duplicates in user's recent 5 responses
-        user_history = list(response_uniqueness.user_responses.get(user_id, []))
-        recent_responses = user_history[-5:]
-
-        for recent_text in recent_responses:
-            if response_text.strip().lower() == recent_text.strip().lower():
-                return True, "Exact duplicate of recent response"
-
-        # Check for high similarity with recent 3 responses
-        for recent_text in recent_responses[-3:]:
-            similarity = response_uniqueness._get_jaccard_similarity(
-                response_text, recent_text
-            )
-            if similarity >= 0.8:  # 80% similarity threshold
-                return (
-                    True,
-                    f"Too similar ({similarity:.1%} word overlap) to recent response",
-                )
-
-        # Check for internal repetition patterns
-        has_internal, patterns = response_uniqueness.has_internal_repetition(
-            response_text
-        )
-        if has_internal:
-            pattern_text = "; ".join(patterns[:2])  # Limit message length
-            return True, f"Internal repetition detected: {pattern_text}"
-
-        return False, ""
-
-    def _generate_non_repetitive_response(
+    async def _generate_non_repetitive_response(
         self, user_message: str, original_response: str
     ) -> str:
         """
-        Generate an alternative response when repetition is detected.
+        Generate an alternative response when repetition is detected using AI rephrasing.
         """
-        # Random variation patterns
-        variations = [
-            "Let me approach this differently...",
-            "Here's another perspective...",
-            "Different take on this...",
-            "Let me rephrase that...",
-            "Alternative response...",
-            "On second thought...",
-            "Actually, let me say this another way...",
+        try:
+            # Multiple rephrasing strategies with stronger prompts
+            rephrase_systems = [
+                # Strategy 1: Complete structural rewrite
+                "You are rewriting a message to avoid repetition. Completely restructure the sentence, use entirely different vocabulary, change the opening, and alter the tone while keeping the same meaning. DO NOT just swap 2-3 words - rewrite it from scratch. Make it sound natural but totally different.",
+                # Strategy 2: Change perspective and style
+                "Rewrite this message using a completely different style. Change the sentence structure entirely, use synonyms for ALL key words, and alter the opening phrase. If it's informal, make it formal. If it's formal, make it casual. Keep the core meaning but express it in a completely fresh way.",
+                # Strategy 3: Shorten or expand for variety
+                "Rewrite this message either much shorter or much longer than the original while keeping the same meaning. If the original is 3 sentences, make it 1 long sentence or 5 short ones. Change all vocabulary and structure completely. Avoid ANY word repetition from the original.",
+            ]
+
+            rephrase_attempts = []
+            max_attempts = 3
+            target_similarity = 0.5  # Aim for under 50% similarity
+
+            for attempt in range(max_attempts):
+                # Rotate through different rephrasing strategies
+                rephrase_system = rephrase_systems[attempt % len(rephrase_systems)]
+
+                rephrase_prompt = (
+                    f"User asked: {user_message}\n\n"
+                    f"Original bot response: {original_response}\n\n"
+                    f"Your task: COMPLETELY rewrite this response. Use different structure, words, and tone. "
+                    f"Make it sound natural but unrecognizable from the original. Do NOT mention that you're rephrasing."
+                )
+
+                rephrase_messages = [
+                    {"role": "system", "content": rephrase_system},
+                    {"role": "user", "content": rephrase_prompt},
+                ]
+
+                # Try multiple rephrases with increasing creativity
+                result = await ai_provider_manager.generate_text(
+                    messages=rephrase_messages,
+                    max_tokens=min(len(original_response.split()) * 3, 800),
+                    temperature=0.9
+                    + (attempt * 0.1),  # Increase temperature each attempt
+                )
+
+                if result and result.get("content"):
+                    rephrased = result["content"].strip()
+                    logger.debug(
+                        f"Attempt {attempt + 1}/{max_attempts}: {repr(rephrased[:80])}"
+                    )
+
+                    # Sanity check: ensure rephrased version is reasonably different
+                    if rephrased and rephrased.lower() != original_response.lower():
+                        # Check similarity to ensure it's genuinely different
+                        similarity = response_uniqueness._get_jaccard_similarity(
+                            rephrased, original_response
+                        )
+                        logger.debug(
+                            f"Attempt {attempt + 1} similarity: {similarity:.2%} "
+                            f"(target: < {target_similarity:.0%})"
+                        )
+
+                        # Store this attempt
+                        rephrase_attempts.append(
+                            {
+                                "text": rephrased,
+                                "similarity": similarity,
+                                "attempt": attempt + 1,
+                            }
+                        )
+
+                        # If under target similarity, use it immediately
+                        if similarity < target_similarity:
+                            logger.info(
+                                f"✅ Successfully rephrased on attempt {attempt + 1} "
+                                f"(similarity: {similarity:.1%})"
+                            )
+                            return rephrased
+                    else:
+                        logger.warning(
+                            f"Attempt {attempt + 1}: AI generated same or empty response"
+                        )
+
+                # If all attempts completed but none under threshold, use best one
+                if rephrase_attempts:
+                    best_attempt = min(rephrase_attempts, key=lambda x: x["similarity"])
+                    logger.info(
+                        f"Using best rephrase attempt {best_attempt['attempt']} "
+                        f"with similarity {best_attempt['similarity']:.1%}"
+                    )
+                    # Only use if at least somewhat different (under 75%)
+                    if best_attempt["similarity"] < 0.75:
+                        return best_attempt["text"]
+                    else:
+                        logger.warning(
+                            f"All rephrase attempts too similar "
+                            f"(best: {best_attempt['similarity']:.1%}), using fallback"
+                        )
+
+        except Exception as e:
+            logger.warning(
+                f"AI rephrasing failed: {e}, falling back to simple variation"
+            )
+
+        # Fallback: Multiple transformation strategies for better variation
+        fallback_strategies = [
+            # Strategy 1: Synonym replacement + structure change
+            lambda text: self._apply_synonym_replacement(text),
+            # Strategy 2: Sentence reordering
+            lambda text: self._reorder_sentences(text),
+            # Strategy 3: Tone flip (formal <-> casual)
+            lambda text: self._flip_tone(text),
+            # Strategy 4: Completely different opening
+            lambda text: self._change_opening(text),
         ]
 
+        # Try each strategy and pick the most different
+        best_fallback = None
+        best_similarity = 1.0
+
+        for strategy_idx, strategy_func in enumerate(fallback_strategies):
+            try:
+                fallback_text = strategy_func(original_response)
+                similarity = response_uniqueness._get_jaccard_similarity(
+                    fallback_text, original_response
+                )
+                logger.debug(
+                    f"Fallback strategy {strategy_idx + 1}: similarity {similarity:.2%}"
+                )
+
+                if similarity < best_similarity:
+                    best_similarity = similarity
+                    best_fallback = fallback_text
+            except Exception as e:
+                logger.debug(f"Fallback strategy {strategy_idx + 1} failed: {e}")
+
+        if best_fallback and best_similarity < 0.85:
+            logger.info(
+                f"Using fallback strategy with similarity {best_similarity:.1%}"
+            )
+            return best_fallback
+
+        # Ultimate fallback: Generate a completely NEW response with explicit avoid list
+        logger.warning("All fallbacks too similar, generating fresh response with explicit avoid list")
+        
+        # Try up to 3 times with increasing creativity
+        for attempt in range(3):
+            try:
+                # Get snippets of responses to explicitly avoid (use a generic key for global avoidance)
+                avoid_snippets = response_uniqueness.get_avoid_list("_global_", limit=5)
+                
+                # Also add the original response we're trying to avoid
+                avoid_snippets.insert(0, original_response[:150])
+                avoid_text = "\n".join([f"- \"{s}\"" for s in avoid_snippets[:5]])
+                
+                fresh_system = (
+                    "You are a sarcastic, edgy AI assistant named Jakey. "
+                    "You MUST respond to the user but your response MUST be COMPLETELY DIFFERENT from these examples:\n\n"
+                    f"{avoid_text}\n\n"
+                    "CRITICAL RULES:\n"
+                    "1. DO NOT start with 'Oh look' or similar openings\n"
+                    "2. DO NOT use the phrase 'another genius' or 'fucking adorable'\n"
+                    "3. Use a COMPLETELY different tone and structure\n"
+                    "4. Be creative - try sarcasm, mockery, questions, or dismissiveness\n"
+                    "5. Keep it natural and in-character as a degenerate gambling bot\n"
+                    "6. DO NOT mention that you're rephrasing or being different"
+                )
+                
+                fresh_result = await ai_provider_manager.generate_text(
+                    messages=[
+                        {"role": "system", "content": fresh_system},
+                        {"role": "user", "content": user_message},
+                    ],
+                    max_tokens=400,
+                    temperature=1.2 + (attempt * 0.1),  # Increase temperature each attempt
+                )
+                
+                if fresh_result and fresh_result.get("content"):
+                    fresh_response = fresh_result["content"].strip()
+                    # Verify it's actually different
+                    fresh_similarity = response_uniqueness._get_jaccard_similarity(
+                        fresh_response, original_response
+                    )
+                    # Also check prefix similarity
+                    prefix_sim = response_uniqueness._get_jaccard_similarity(
+                        fresh_response[:100], original_response[:100]
+                    )
+                    
+                    if fresh_similarity < 0.70 and prefix_sim < 0.70:
+                        logger.info(f"✅ Fresh response generated on attempt {attempt+1} with {fresh_similarity:.1%} similarity")
+                        return fresh_response
+                    else:
+                        logger.warning(f"Fresh attempt {attempt+1} still too similar (full: {fresh_similarity:.1%}, prefix: {prefix_sim:.1%})")
+            except Exception as e:
+                logger.warning(f"Fresh response attempt {attempt+1} failed: {e}")
+        
+        # Absolute last resort: Generate a simple different response
+        import random
+        fallback_responses = [
+            "What? I wasn't paying attention. Say that again.",
+            "Huh. That's something. I guess.",
+            "*yawns* You still here?",
+            "Cool story bro. Tell it again.",
+            "I heard you. I just don't care.",
+            "Yeah yeah, whatever you say chief.",
+            "Is that so? Fascinating. Not really though.",
+            "Mhmm. Sure. Totally listening.",
+        ]
+        return random.choice(fallback_responses)
+
+    def _apply_synonym_replacement(self, text: str) -> str:
+        """Replace key words with synonyms for variation."""
+        synonyms = {
+            "hello": ["hi there", "hey", "greetings", "what's up", "howdy"],
+            "I think": [
+                "I believe",
+                "in my opinion",
+                "it seems to me",
+                "from my perspective",
+            ],
+            "basically": ["essentially", "fundamentally", "at its core", "in essence"],
+            "actually": ["in fact", "as it happens", "really", "truth be told"],
+            "really": ["truly", "genuinely", "actually", "honestly"],
+            "just": ["simply", "merely", "only", "just about"],
+            "want": ["need", "require", "looking for", "after"],
+            "different": ["various", "alternative", "distinct", "diverse"],
+            "same": ["identical", "matching", "equivalent", "similar"],
+            "thing": ["matter", "issue", "topic", "subject"],
+            "good": ["great", "excellent", "solid", "decent"],
+            "bad": ["terrible", "awful", "poor", "unfortunate"],
+        }
+
+        result = text
+        for original, replacements in synonyms.items():
+            if original.lower() in result.lower():
+                import random
+
+                replacement = random.choice(replacements)
+                # Case-insensitive replacement
+                result = re.sub(
+                    re.escape(original),
+                    replacement,
+                    result,
+                    flags=re.IGNORECASE,
+                    count=1,
+                )
+        return result
+
+    def _reorder_sentences(self, text: str) -> str:
+        """Slightly reorder sentence structure."""
+        sentences = text.split(". ")
+        if len(sentences) > 1:
+            import random
+
+            sentences = sentences[1:] + sentences[:1]  # Move first to last
+            return ". ".join(sentences).strip()
+        return text
+
+    def _flip_tone(self, text: str) -> str:
+        """Flip between formal and casual tone."""
+        # Check if text contains casual markers
+        casual_indicators = [
+            "hey",
+            "what's up",
+            "cool",
+            "awesome",
+            "stuff",
+            "gonna",
+            "wanna",
+        ]
+        is_casual = any(indicator in text.lower() for indicator in casual_indicators)
+
+        if is_casual:
+            # Make more formal
+            result = text.replace("hey", "Hello there")
+            result = result.replace("what's up", "How are you doing")
+            result = result.replace("gonna", "going to")
+            result = result.replace("wanna", "want to")
+            result = result.replace("stuff", "matters")
+            result = result.replace("cool", "excellent")
+        else:
+            # Make more casual
+            result = text.replace("Hello", "Hey")
+            result = result.replace("I would like", "I want")
+            result = result.replace("regarding", "about")
+            result = result.replace("concerning", "on")
+
+        return result
+
+    def _change_opening(self, text: str) -> str:
+        """Change the opening phrase completely."""
+        openings = [
+            "Well then, ",
+            "Anyway, ",
+            "Look here, ",
+            "You know, ",
+            "So, ",
+            "Here's the thing - ",
+        ]
         import random
 
-        prefix = random.choice(variations)
-
-        # Add context-aware variation based on original response length
-        if len(original_response.split()) < 10:
-            # For short responses, completely rephrase
-            return f"{prefix}\n\n{original_response}\n\n*Note: I've varied my response to avoid repetition!*"
-        else:
-            # For longer responses, keep some of the original content
-            words = original_response.split()
-            mid_point = len(words) // 2
-            variation_text = " ".join(words[:mid_point])
-            return f"{prefix}\n\n{variation_text}...\n\n*Note: I've varied my response to avoid repetition!*"
+        return random.choice(openings) + text.lstrip()
 
     def _store_user_response(self, user_id: str, response_text: str):
         """
         Store a user's successful response for future repetition detection.
         """
+        # Log what we're storing
+        logger.info(
+            f"Storing bot response for user {user_id}: {len(response_text)} chars, "
+            f"preview: {repr(response_text[:80])}"
+        )
+
+        # Check current storage before adding
+        before_count = len(response_uniqueness.user_responses.get(user_id, []))
+
         response_uniqueness.add_response(user_id, response_text)
+
+        # Verify it was stored
+        after_count = len(response_uniqueness.user_responses.get(user_id, []))
+
+        # Note: When deque is at maxlen (10), count won't increase - old items are evicted
+        # This is expected behavior, not a failure
+        if after_count >= before_count:
+            logger.debug(
+                f"✅ Response stored successfully for user {user_id}. "
+                f"History size: {before_count} → {after_count}"
+            )
+        else:
+            logger.warning(
+                f"⚠️  Response storage failed for user {user_id}. "
+                f"Count decreased unexpectedly: {before_count} → {after_count}"
+            )
+
+        # Log total history for that user
+        user_history = list(response_uniqueness.user_responses.get(user_id, []))
+        logger.debug(
+            f"User {user_id} now has {len(user_history)} total responses in history: "
+            f"{[repr(h[:50]) for h in user_history[-3:]]}"
+        )
 
     async def setup_hook(self):
         """Initialize the bot with self-bot specific features"""
@@ -483,10 +984,10 @@ class JakeyBot(commands.Bot):
     async def on_ready(self):
         """Called when the bot is ready"""
         # Set current model to default if not already set
-        from config import DEFAULT_MODEL
+        from config import OPENROUTER_DEFAULT_MODEL
 
         if self.current_model is None:
-            self.current_model = DEFAULT_MODEL
+            self.current_model = OPENROUTER_DEFAULT_MODEL
 
         # Register commands only once
         if not self._commands_loaded:
@@ -510,10 +1011,15 @@ class JakeyBot(commands.Bot):
         # Initialize message queue integration if enabled
         if self._message_queue_enabled:
             try:
-                from discord_queue_integration import setup_message_queue_integration
-
-                self.message_queue_integration = await setup_message_queue_integration(
-                    self
+                # Dynamically import optional module
+                discord_queue_integration = __import__(
+                    "discord_queue_integration",
+                    fromlist=["setup_message_queue_integration"],
+                )
+                self.message_queue_integration = (
+                    await discord_queue_integration.setup_message_queue_integration(
+                        self
+                    )
                 )
                 logger.info(
                     "✅ Message queue integration initialized and connected to bot"
@@ -523,6 +1029,10 @@ class JakeyBot(commands.Bot):
                     f"⚠️  Could not initialize message queue integration: {e}"
                 )
                 self.message_queue_integration = None
+
+        # Check and save permissions for all guilds
+        asyncio.create_task(self._check_and_save_permissions())
+        logger.info("Started permission check task")
 
     async def on_message(self, message):
         """Handle incoming messages with improved self-bot practices"""
@@ -581,7 +1091,11 @@ class JakeyBot(commands.Bot):
                             )
 
                             try:
-                                from resilience import MessagePriority
+                                # Dynamically import optional module
+                                resilience = __import__(
+                                    "resilience", fromlist=["MessagePriority"]
+                                )
+                                MessagePriority = resilience.MessagePriority
 
                                 # Determine priority based on command type
                                 priority = MessagePriority.NORMAL
@@ -681,19 +1195,25 @@ class JakeyBot(commands.Bot):
 
                             return  # Don't process as regular message
 
-        # Check for "wen?" message and respond after 7 seconds
+        # Check for "wen?" message and respond after 7 seconds (random chance to trigger)
         wen = r"\b(wen+\?+)$"
         if re.search(wen, message.content.lower(), re.IGNORECASE):
+            # Random chance to trigger (10% chance)
+            if random.random() > 0.10:
+                return  # Skip this time
+
             # Check if we've already responded to this message or if it's in cooldown
             current_time = time.time()
 
-            # Clean up old entries only if dictionary is getting large (OPTIMIZED)
-            if len(self.wen_cooldown) > 100:  # Only clean if we have many entries
+            # Clean up expired entries periodically (every 50 entries or every 5 minutes)
+            if len(self.wen_cooldown) > 50 or (hasattr(self, '_last_wen_cleanup') and 
+                current_time - self._last_wen_cleanup > 300):
                 self.wen_cooldown = {
                     msg_id: timestamp
                     for msg_id, timestamp in self.wen_cooldown.items()
                     if current_time - timestamp < self.wen_cooldown_duration
                 }
+                self._last_wen_cleanup = current_time
 
             # Check if this message has been processed recently
             if message.id not in self.wen_cooldown:
@@ -714,11 +1234,6 @@ class JakeyBot(commands.Bot):
                 "$mathdrop",
                 "$phrasedrop",
                 "$redpacket",
-                "$ airdrop",
-                "$ triviadrop",
-                "$ mathdrop",
-                "$ phrasedrop",
-                "$ redpacket",
             )
         ):
             # This is an airdrop command, process it
@@ -749,7 +1264,21 @@ class JakeyBot(commands.Bot):
             should_respond = True
         elif await self.db.acheck_message_for_keywords(message.content):
             # Check if any configured keywords are in the message
-            should_respond = True
+            # Random chance to trigger (50% chance) for better responsiveness
+            if random.random() <= 0.30:
+                should_respond = True
+                logger.info(f"Keyword triggered response (50% chance hit)")
+
+        # Check guild blacklist - ignore messages from blacklisted guilds but allow DMs
+        if (
+            should_respond
+            and message.guild
+            and str(message.guild.id) in GUILD_BLACKLIST
+        ):
+            logger.info(
+                f"Ignoring message from blacklisted guild: {message.guild.name} ({message.guild.id})"
+            )
+            should_respond = False
 
         # Add a cooldown to prevent spam (3 seconds)
         current_time = time.time()
@@ -773,12 +1302,38 @@ class JakeyBot(commands.Bot):
     async def process_jakey_response(self, message):
         """Process Jakey's AI response to a message."""
         try:
-            # Import here to avoid circular imports
-            from ai.ai_provider_manager import SimpleAIProviderManager
+            # Check user rate limit first
+            user_id = str(message.author.id)
+            is_rate_limited, time_remaining = await self._check_user_rate_limit(user_id)
+            
+            if is_rate_limited:
+                # Notify user about rate limit
+                minutes = int(time_remaining // 60)
+                seconds = int(time_remaining % 60)
+                if minutes > 0:
+                    time_str = f"{minutes}m {seconds}s"
+                else:
+                    time_str = f"{seconds}s"
+                
+                logger.info(f"User {user_id} rate limited, {time_remaining:.1f}s remaining")
+                await message.channel.send(
+                    f"🚫 **Whoa there, slow down!** You're hitting me up too fast. "
+                    f"Try again in **{time_str}**."
+                )
+                return
+            
+            # Increment user request count
+            await self._increment_user_request(user_id)
+            
+            # Add thinking reaction to show we're processing
+            try:
+                await message.add_reaction("🤔")
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass  # Message deleted or no permission
 
-            # Initialize AI provider manager if not already done
+            # Use global AI provider manager singleton
             if not hasattr(self, "_ai_manager"):
-                self._ai_manager = SimpleAIProviderManager()
+                self._ai_manager = ai_provider_manager
 
             # Prepare the message for AI processing
             user_content = message.content.strip()
@@ -799,18 +1354,62 @@ class JakeyBot(commands.Bot):
                 logger.debug(f"Failed to get memory context: {e}")
 
             # Create system message - combine system prompt and memory context
-            system_content = SYSTEM_PROMPT
+            # Add anti-repetition rules to prevent repetitive responses
+            from ai.response_uniqueness import response_uniqueness
+
+            if not hasattr(self, "_response_uniqueness"):
+                self._response_uniqueness = response_uniqueness
+            system_content = self._response_uniqueness.enhance_system_prompt_base(
+                SYSTEM_PROMPT
+            )
+
+            # Inject recent responses so AI knows what it already said (prevents repetition)
+            recent_responses = list(
+                response_uniqueness.user_responses.get(str(message.author.id), [])
+            )[-3:]
+            if recent_responses:
+                recent_text = "\n".join(
+                    [
+                        f"- {resp[:300]}..." if len(resp) > 300 else f"- {resp}"
+                        for resp in recent_responses
+                    ]
+                )
+                system_content += (
+                    f"\n\nYOUR RECENT RESPONSES TO THIS USER (DO NOT REPEAT THESE - use different openings, structure, and phrasing):\n"
+                    f"{recent_text}"
+                )
+
             if memory_context:
                 system_content += f"\n\nUser Context (remembered from previous conversations):\n{memory_context}\n\nUse this context to personalized your response, but don't explicitly mention that you're remembering things."
 
             # Add channel context if available
             channel_context = await self.collect_recent_channel_context(
-                message, 
-                limit_minutes=CHANNEL_CONTEXT_MINUTES, 
-                message_limit=CHANNEL_CONTEXT_MESSAGE_LIMIT
+                message,
+                limit_minutes=CHANNEL_CONTEXT_MINUTES,
+                message_limit=CHANNEL_CONTEXT_MESSAGE_LIMIT,
             )
             if channel_context:
                 system_content += f"\n\n{channel_context}\n\nUse this channel context to understand what's being discussed."
+                logger.info(
+                    f"Added channel context ({len(channel_context)} chars) to AI prompt"
+                )
+
+            # Add explicit current context (IDs) to help with tool calls and reduce tool loops
+            guild_info = (
+                f"{message.guild.name} (ID: {message.guild.id})"
+                if message.guild
+                else "Direct Message (No Guild)"
+            )
+            channel_name = getattr(message.channel, "name", "DM")
+            current_context_info = (
+                f"\n\nCURRENT EXECUTION CONTEXT:"
+                f"\n- Current Guild: {guild_info}"
+                f"\n- Current Channel: {channel_name} (ID: {message.channel.id})"
+                f"\n- Message Author: {message.author.name} (ID: {message.author.id})"
+                f"\n- Your User ID: {self.user.id if self.user else 'Unknown'}"
+                f"\n\nIMPORTANT: Use these IDs directly for tool calls. Do NOT call list_guilds or list_channels to find the current location."
+            )
+            system_content += current_context_info
 
             messages = [
                 {"role": "system", "content": system_content},
@@ -861,49 +1460,170 @@ class JakeyBot(commands.Bot):
                 max_tokens=500,
                 tools=available_tools,
                 tool_choice="auto",
+                # Anti-repetition parameters from OpenRouter API
+                repetition_penalty=1.15,  # Slightly penalize repeated tokens
+                frequency_penalty=0.3,  # Reduce repetition of frequent tokens
+                presence_penalty=0.2,  # Slightly reduce repetition of present tokens
+                # Enable model fallback routing for reliability
+                use_fallback_routing=True,
+                # Track user for rate limiting
+                user=str(message.author.id),
             )
 
             if response.get("error"):
-                logger.error(f"AI generation error: {response['error']}")
-                await message.channel.send(
-                    "💀 **Sorry, I'm having trouble thinking right now. Try again later.**"
-                )
+                error_msg = response['error']
+                logger.error(f"AI generation error: {error_msg}")
+                
+                # Check if it's a rate limit error
+                if response.get("rate_limited") or "rate limit" in str(error_msg).lower():
+                    # Try to get time until reset from OpenRouter
+                    try:
+                        rate_status = openrouter_api.check_rate_limits()
+                        if rate_status.get("seconds_until_reset"):
+                            wait_time = int(rate_status["seconds_until_reset"])
+                            await message.channel.send(
+                                f"🚫 **I'm being rate limited by my AI provider.** "
+                                f"Try again in **{wait_time}s**."
+                            )
+                        else:
+                            await message.channel.send(
+                                "🚫 **I'm being rate limited by my AI provider.** "
+                                "Try again in about a minute."
+                            )
+                    except Exception:
+                        await message.channel.send(
+                            "🚫 **I'm being rate limited by my AI provider.** "
+                            "Try again in about a minute."
+                        )
+                else:
+                    await message.channel.send(
+                        "💀 **Sorry, I'm having trouble thinking right now. Try again later.**"
+                    )
                 return
 
             # Parse OpenAI-format response from providers
+            generated_image_urls = []  # Track image URLs to ensure they're in the response
             if "choices" in response and len(response["choices"]) > 0:
                 ai_message = response["choices"][0]["message"]
                 content = ai_message.get("content", "")
                 ai_response = content.strip() if content else ""
 
+                # Debug: Log what we received
+                logger.info(
+                    f"AI response content (first 200 chars): {repr(ai_response[:200]) if ai_response else 'EMPTY'}"
+                )
+                logger.info(f"AI message keys: {list(ai_message.keys())}")
+
+                # Some models put content in 'reasoning' field instead of 'content'
+                # But reasoning often contains internal chain-of-thought, not final answer
+                if not ai_response and ai_message.get("reasoning"):
+                    reasoning = ai_message.get("reasoning", "")
+                    reasoning_details = ai_message.get("reasoning_details", [])
+                    logger.info(
+                        f"Model returned reasoning instead of content (len={len(reasoning)})"
+                    )
+
+                    # Try to extract actual response from reasoning
+                    ai_response = extract_final_response_from_reasoning(reasoning)
+
+                    if ai_response:
+                        logger.info(
+                            f"Extracted response from reasoning: {repr(ai_response[:200])}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Could not extract clean response from reasoning"
+                        )
+
+                # Log full message if still empty
+                if not ai_response:
+                    logger.warning(f"Full ai_message: {ai_message}")
+
                 # Handle tool calls if present
                 tool_calls = ai_message.get("tool_calls", [])
 
-                if tool_calls:
+                # DEFENSIVE: Check if model returned tool call as JSON text in content instead of using API
+                if not tool_calls and ai_response:
+                    extracted_calls, cleaned_response = extract_text_tool_calls(
+                        ai_response
+                    )
+                    if extracted_calls:
+                        logger.warning(
+                            "⚠️ Model returned tool call as TEXT instead of using proper API format!"
+                        )
+                        tool_calls = extracted_calls
+                        ai_response = cleaned_response
+                        logger.info(
+                            f"✅ Converted text-based tool call to proper format"
+                        )
+
+                # Multi-round tool execution loop
+                tool_round = 0
+                max_tool_rounds = 5
+                generated_image_urls = []  # Track image URLs to ensure they're in the response
+
+                while tool_calls and tool_round < max_tool_rounds:
+                    tool_round += 1
+                    logger.info(
+                        f"🔄 Processing tool round {tool_round}/{max_tool_rounds} with {len(tool_calls)} calls"
+                    )
+
+                    # Check if tool calls exist
+                    if not tool_calls:
+                        break
+
+                    # Save content for history, but clear for user output (we only show final result)
+                    assistant_content = ai_response
+                    ai_response = ""
+
                     # Execute tool calls and build tool responses
                     from tools.tool_manager import tool_manager
 
                     # Create tool response messages for the AI
                     tool_messages = []
                     for tool_call in tool_calls:
-                        function_name = tool_call["function"]["name"]
+                        # Extract function name with defensive access
+                        function_name = "unknown"
+                        tool_call_id = tool_call.get("id", f"unknown_{id(tool_call)}")
                         try:
+                            function_info = tool_call.get("function", {})
+                            function_name = function_info.get("name", "unknown")
+
                             # Parse arguments - may already be a dict or may be JSON string
                             import json
 
-                            args = tool_call["function"]["arguments"]
+                            args = function_info.get("arguments", {})
                             if isinstance(args, str):
                                 arguments = json.loads(args)
                             else:
                                 arguments = args
 
                             # Handle special "current" channel_id for Discord tools
-                            # Convert "current" to the actual channel ID from the message context
                             channel_id_arg_names = ["channel_id", "channel"]
                             for arg_name in channel_id_arg_names:
-                                if arg_name in arguments and arguments[arg_name] == "current":
-                                    arguments[arg_name] = str(message.channel.id)
-                                    logger.info(f"Replaced 'current' channel_id with actual ID: {arguments[arg_name]}")
+                                if arg_name in arguments:
+                                    val = str(arguments[arg_name]).lower().strip()
+                                    if val in (
+                                        "current",
+                                        "current channel",
+                                        "this channel",
+                                        "here",
+                                    ):
+                                        arguments[arg_name] = str(message.channel.id)
+                                        logger.info(
+                                            f"Replaced '{val}' channel_id with actual ID: {arguments[arg_name]}"
+                                        )
+
+                            # Convert string numbers to integers for limit parameters
+                            int_arg_names = ["limit", "count", "num", "amount"]
+                            for arg_name in int_arg_names:
+                                if arg_name in arguments and isinstance(
+                                    arguments[arg_name], str
+                                ):
+                                    try:
+                                        arguments[arg_name] = int(arguments[arg_name])
+                                    except ValueError:
+                                        pass  # Keep as string if not a valid number
 
                             # Execute the tool
                             logger.info(
@@ -912,16 +1632,23 @@ class JakeyBot(commands.Bot):
                             result = await tool_manager.execute_tool(
                                 function_name, arguments, str(message.author.id)
                             )
-                            logger.info(
-                                f"Tool result: {function_name} -> {str(result)[:200]}"
-                            )
+                            # Truncate result for logging
+                            log_result = str(result)
+                            if len(log_result) > 200:
+                                log_result = log_result[:200] + "..."
+                            logger.info(f"Tool result: {function_name} -> {log_result}")
+
+                            # Track generated image URLs to ensure they appear in the response
+                            if function_name == "generate_image" and isinstance(result, str) and result.startswith("http"):
+                                generated_image_urls.append(result)
+                                logger.info(f"📸 Tracked generated image URL for response")
 
                             # Add tool response
                             tool_messages.append(
                                 {
                                     "role": "tool",
                                     "content": str(result),
-                                    "tool_call_id": tool_call["id"],
+                                    "tool_call_id": tool_call_id,
                                 }
                             )
                         except Exception as e:
@@ -930,90 +1657,269 @@ class JakeyBot(commands.Bot):
                                 {
                                     "role": "tool",
                                     "content": f"Error executing tool {function_name}: {str(e)}",
-                                    "tool_call_id": tool_call["id"],
+                                    "tool_call_id": tool_call_id,
                                 }
                             )
 
-                    # Now make a follow-up call with tool results to get final response
+                    # Update conversation history
                     if tool_messages:
-                        # Add the original assistant message with tool calls to the conversation
+                        # Add the assistant message that requested the tools
                         valid_messages.append(
                             {
                                 "role": "assistant",
-                                "content": ai_response,  # This might be empty if only tool calls were made
+                                "content": assistant_content,
                                 "tool_calls": tool_calls,
                             }
                         )
-
-                        # Add tool responses to the conversation
+                        # Add the tool results
                         valid_messages.extend(tool_messages)
 
-                        logger.info(
-                            f"Making follow-up AI call with {len(tool_messages)} tool results"
-                        )
+                        # Generate follow-up response
+                        max_retries = 2
+                        retry_delay = 1.0
+                        final_response = None
 
-                        # Get the final response from AI based on tool results
-                        final_response = await self._ai_manager.generate_text(
-                            messages=valid_messages,
-                            model=self.current_model,
-                            temperature=0.7,
-                            max_tokens=500
-                        )
-                        logger.info(f"Follow-up AI response received: {str(final_response)[:200]}")
+                        # Minimal delay between tool rounds (reduced from 2.0s)
+                        await asyncio.sleep(0.5)
 
-                        if final_response.get("error"):
-                            logger.error(
-                                f"AI final response error: {final_response['error']}"
+                        # Force "none" on final round to prevent infinite loops
+                        is_final_round = tool_round >= max_tool_rounds - 1
+                        current_tool_choice = "none" if is_final_round else "auto"
+
+                        if is_final_round:
+                            logger.info(
+                                f"⚠️ Final tool round - forcing tool_choice='none' to stop loop"
                             )
+
+                        for attempt in range(max_retries):
+                            # Check if this is a web_search response - use dedicated model
+                            has_web_search = any(
+                                tc.get("function", {}).get("name") == "web_search"
+                                for tc in tool_calls
+                            )
+
+                            if has_web_search and not is_final_round:
+                                final_response = (
+                                    await self._ai_manager.generate_text_for_web_search(
+                                        messages=valid_messages,
+                                        temperature=0.5,
+                                        max_tokens=1000,
+                                    )
+                                )
+                            else:
+                                final_response = await self._ai_manager.generate_text(
+                                    messages=valid_messages,
+                                    model=self.current_model,
+                                    temperature=0.7,
+                                    max_tokens=2000,
+                                    tools=available_tools
+                                    if not is_final_round
+                                    else None,
+                                    tool_choice=current_tool_choice,
+                                    # Anti-repetition parameters
+                                    repetition_penalty=1.15,
+                                    frequency_penalty=0.3,
+                                    presence_penalty=0.2,
+                                    use_fallback_routing=True,
+                                    user=str(message.author.id),
+                                )
+
+                            if final_response.get("error"):
+                                error_msg = final_response.get("error", "")
+                                error_code = final_response.get("code", "")
+                                logger.warning(
+                                    f"Follow-up call failed (attempt {attempt + 1}): {error_msg}"
+                                )
+
+                                if error_code and error_code in [500, 502, 503, 504]:
+                                    if attempt < max_retries - 1:
+                                        await asyncio.sleep(retry_delay)
+                                        retry_delay *= 2
+                                        continue
+
+                                # If non-retriable or retries exhausted
+                                if attempt == max_retries - 1:
+                                    # Check for rate limit
+                                    if final_response.get("rate_limited") or "rate limit" in str(error_msg).lower():
+                                        await message.channel.send(
+                                            "🚫 **I'm being rate limited by my AI provider.** "
+                                            "Try again in about a minute."
+                                        )
+                                    else:
+                                        await message.channel.send(
+                                            "💀 **Sorry, I'm having trouble thinking right now.**"
+                                        )
+                                    return
+                            else:
+                                break  # Success
+
+                        # Process the new response (guard against None)
+                        if final_response is None:
+                            logger.error("final_response is None after retry loop")
                             await message.channel.send(
-                                "💀 **Sorry, I'm having trouble getting the final response. Try again later.**"
+                                "💀 **Sorry, I'm having trouble thinking right now.**"
                             )
                             return
 
-                        # Extract the final AI response
                         if (
                             "choices" in final_response
                             and len(final_response["choices"]) > 0
                         ):
-                            content = final_response["choices"][0]["message"].get(
-                                "content", ""
-                            )
+                            ai_message = final_response["choices"][0]["message"]
+                            content = ai_message.get("content", "")
+
+                            # Check reasoning
+                            if not content and ai_message.get("reasoning"):
+                                content = extract_final_response_from_reasoning(
+                                    ai_message.get("reasoning", "")
+                                )
+
                             ai_response = content.strip() if content else ""
+                            tool_calls = ai_message.get("tool_calls", [])
+
+                            # Check for text-based tool calls again (defensive)
+                            if not tool_calls and ai_response:
+                                extracted_calls, cleaned_response = (
+                                    extract_text_tool_calls(ai_response)
+                                )
+                                if extracted_calls:
+                                    tool_calls = extracted_calls
+                                    ai_response = cleaned_response
+                                    logger.info(
+                                        f"✅ Converted text-based tool call in loop"
+                                    )
                         else:
-                            content = final_response.get("content", "")
-                            ai_response = content.strip() if content else ""
-                else:
-                    # No tool calls, continue with original response
-                    pass
+                            # No valid choices or error response structure
+                            ai_response = final_response.get("content", "")
+                            tool_calls = []
+
+                        # Loop continues if tool_calls is not empty
+                    else:
+                        # No tool messages generated? Should not happen if tool_calls was true.
+                        tool_calls = []  # Break loop
+
+                if tool_calls:
+                    logger.warning(
+                        f"⚠️ Max tool rounds ({max_tool_rounds}) reached. Stopping."
+                    )
+                    ai_response += "\n\n*(I had to stop because I was doing too many things at once)*"
             else:
                 ai_response = response.get("content", "").strip()
+                logger.warning(
+                    f"Response had no 'choices' key. Response keys: {response.keys()}"
+                )
 
             if not ai_response:
+                logger.warning(
+                    f"ai_response is empty before sending 'mind went blank'. ai_response={repr(ai_response)}"
+                )
                 await message.channel.send("💀 **My mind went blank. Try again?**")
                 return
 
-            # Check for repetition
-            is_repetitive, repetition_info = self._is_repetitive_response(
+            # Validate message object has required attributes
+            if (
+                not hasattr(message, "author")
+                or not hasattr(message, "channel")
+                or not hasattr(message, "content")
+            ):
+                logger.warning(f"Invalid message object type: {type(message)}")
+                await message.channel.send("💀 **Processing error. Try again?**")
+                return
+
+            # Check for repetition using the response_uniqueness manager
+            is_repetitive, repetition_info = response_uniqueness.is_repetitive_response(
                 str(message.author.id), ai_response
             )
             if is_repetitive:
-                logger.debug(f"Repetition detected: {repetition_info}")
-                ai_response = self._generate_non_repetitive_response(
-                    message.content, ai_response
+                logger.warning(
+                    f"🔄 Repetition detected for user {message.author.id}: {repetition_info}"
+                )
+                logger.debug(f"Original response: {repr(ai_response[:100])}")
+
+                # Show user's response history for debugging
+                user_history = list(
+                    response_uniqueness.user_responses.get(str(message.author.id), [])
+                )
+                logger.debug(
+                    f"User {message.author.id} has {len(user_history)} responses in history"
+                )
+                if user_history:
+                    logger.debug(
+                        f"Recent responses: {[repr(h[:50]) for h in user_history[-3:]]}"
+                    )
+
+                # Use AI to rephrase the response instead of sending it as-is
+                logger.info("Generating rephrased response to avoid repetition...")
+                user_message_content = (
+                    message.content if hasattr(message, "content") else str(message)
+                )
+                original_response = ai_response
+                ai_response = await self._generate_non_repetitive_response(
+                    user_message_content, ai_response
+                )
+                # Log the final response length to verify it changed
+                logger.info(
+                    f"Rephrased response generated: original length {len(original_response)} chars, "
+                    f"new length {len(ai_response)} chars"
+                )
+                logger.debug(f"New response preview: {repr(ai_response[:100])}")
+            else:
+                logger.debug(
+                    f"No repetition detected for response: {repr(ai_response[:100])}"
                 )
 
             # Sanitize response to remove any leaked tool call syntax
             ai_response = sanitize_ai_response(ai_response)
-            
+
+            # Ensure generated image URLs are included in the response
+            # The AI sometimes forgets to include them, so we append any missing ones
+            if generated_image_urls:
+                for url in generated_image_urls:
+                    if url not in ai_response:
+                        ai_response = ai_response.rstrip() + "\n\n" + url
+                        logger.info(f"📸 Appended missing image URL to response")
+
             if not ai_response:
                 # Response was only tool call syntax with no actual message
-                logger.debug("AI response was empty after sanitization (contained only tool call syntax)")
+                logger.warning(
+                    "AI response was empty after sanitization (contained only tool call syntax)"
+                )
+                await message.channel.send(
+                    "💀 **I got the info but forgot what to say. Try rephrasing?**"
+                )
                 return
 
-            # Send the response with typing indicator (no artificial delay)
+            # Send the response with typing indicator
+            # Calculate typing delay based on response length (simulates natural typing)
+            typing_time = min(
+                len(ai_response) / 50, 3.0
+            )  # ~50 chars/sec, max 3 seconds
             async with message.channel.typing():
-                pass  # Just show typing indicator without delay
+                await asyncio.sleep(typing_time)
+
+            # Discord has a 2000 character limit - truncate if needed
+            if len(ai_response) > 2000:
+                original_length = len(ai_response)
+                # Try to truncate at a sentence boundary
+                truncated = ai_response[:1990]
+                last_period = truncated.rfind(".")
+                last_newline = truncated.rfind("\n")
+                cut_point = max(last_period, last_newline)
+                if cut_point > 1500:  # Only use sentence boundary if reasonable
+                    ai_response = truncated[: cut_point + 1] + "..."
+                else:
+                    ai_response = truncated + "..."
+                logger.info(
+                    f"Truncated response from {original_length} to {len(ai_response)} chars"
+                )
+
             await message.channel.send(ai_response)
+
+            # Remove thinking reaction after sending response
+            try:
+                await message.remove_reaction("🤔", self.user)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass  # Message deleted or no permission
 
             # Store the interaction
             try:
@@ -1126,16 +2032,16 @@ class JakeyBot(commands.Bot):
                 logger.error(f"Error in periodic memory cleanup: {e}")
 
     async def collect_recent_channel_context(
-        self, message, limit_minutes: int = 30, message_limit: int = 10
+        self, message, limit_minutes: int = 30, message_limit: int = 20
     ) -> str:
         """
         Collect recent channel messages for context.
-        
+
         Args:
             message: The Discord message object
             limit_minutes: How far back to look (default: 30 minutes)
-            message_limit: Maximum number of messages to include (default: 10)
-            
+            message_limit: Maximum number of messages to include (default: 20)
+
         Returns:
             Formatted string of recent channel messages, or empty string for DMs
         """
@@ -1143,40 +2049,50 @@ class JakeyBot(commands.Bot):
             # Return empty for DM channels (no guild)
             if not message.guild:
                 return ""
-            
+
             channel = message.channel
-            if not hasattr(channel, 'history'):
+            if not hasattr(channel, "history"):
                 return ""
-            
+
             # Calculate cutoff time
             from datetime import datetime, timedelta, timezone
+
             cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=limit_minutes)
-            
+
             # Collect messages
             messages = []
-            async for msg in channel.history(limit=message_limit, after=cutoff_time):
+            async for msg in channel.history(
+                limit=message_limit + 5, after=cutoff_time
+            ):
                 # Skip system messages and the current message
                 if msg.type != discord.MessageType.default:
                     continue
-                if msg.author == self.user:
-                    continue
                 if msg.id == message.id:
                     continue
-                    
-                # Format the message
+
+                # Format the message - include bot's own messages too for context
                 timestamp = msg.created_at.strftime("%H:%M")
                 author_name = msg.author.name
-                content = msg.content[:200]  # Truncate long messages
-                messages.append(f"[{timestamp}] {author_name}: {content}")
-            
+                if msg.author == self.user:
+                    author_name = "Jakey (me)"
+                content = msg.content[:300]  # Truncate long messages
+                if content:  # Only include non-empty messages
+                    messages.append(f"[{timestamp}] {author_name}: {content}")
+
+                if len(messages) >= message_limit:
+                    break
+
             if not messages:
                 return ""
-            
+
+            # Reverse to show chronological order (oldest first)
+            messages.reverse()
+
             # Format as context
-            context = "\nRecent channel conversation:\n" + "\n".join(messages)
+            context = "Recent channel conversation:\n" + "\n".join(messages)
             logger.debug(f"Collected {len(messages)} messages for channel context")
             return context
-            
+
         except Exception as e:
             logger.debug(f"Could not collect channel context: {e}")
             return ""
@@ -1227,8 +2143,6 @@ class JakeyBot(commands.Bot):
 
                 # Parse reminder IDs from the result
                 # The result format is "🔔 N reminder(s) are due:\n- title (ID: X, User: Y)\n"
-                import re
-
                 reminder_matches = re.findall(
                     r"\(ID: (\d+), User: ([\w\d]+)\)", due_reminders_result
                 )
@@ -1258,9 +2172,13 @@ class JakeyBot(commands.Bot):
                         if not discord_user:
                             try:
                                 discord_user = await self.fetch_user(int(user_id))
-                            except:
+                            except (
+                                discord.NotFound,
+                                discord.HTTPException,
+                                ValueError,
+                            ) as e:
                                 logger.warning(
-                                    f"Could not find user {user_id} for reminder {reminder_id}"
+                                    f"Could not find user {user_id} for reminder {reminder_id}: {e}"
                                 )
                                 continue
 
@@ -1363,10 +2281,10 @@ class JakeyBot(commands.Bot):
         logger.debug(f"Detected potential drop: {original_message.content}")
 
         try:
-            # Wait for the tip.cc bot response - reduced timeout for faster response
+            # Wait for the tip.cc bot response - increased timeout for slow tip.cc responses
             tip_cc_message = await self.wait_for(
                 "message",
-                timeout=8,  # Reduced from 15s for faster airdrops
+                timeout=15,  # Increased to 15s to handle slow tip.cc responses
                 check=lambda m: (
                     m.author.id == 617037497574359050
                     and m.channel.id == original_message.channel.id
@@ -1374,7 +2292,9 @@ class JakeyBot(commands.Bot):
                 ),
             )
         except asyncio.TimeoutError:
-            logger.debug("Timeout waiting for tip.cc message.")
+            logger.warning(
+                f"Timeout waiting for tip.cc message in {original_message.channel.name}"
+            )
             return
 
         if not tip_cc_message.embeds:
@@ -1414,72 +2334,81 @@ class JakeyBot(commands.Bot):
             # Use normal delay logic for longer airdrops
             await self.maybe_delay(drop_ends_in)
             delay = 0  # Skip the sleep below since we already waited
-            
+
         if delay > 0:
             logger.debug(f"Fast airdrop delay: {round(delay, 3)}s")
             await asyncio.sleep(delay)
 
         try:
+            # Get embed title safely (may be None)
+            embed_title = (embed.title or "").lower()
+
             # Airdrop - Optimized for 1-10s window
-            if "airdrop" in embed.title.lower() and not AIRDROP_DISABLE_AIRDROP:
+            if "airdrop" in embed_title and not AIRDROP_DISABLE_AIRDROP:
                 if tip_cc_message.components and tip_cc_message.components[0].children:
                     button = tip_cc_message.components[0].children[0]
-                    
+
                     # Ultra-fast retry logic - no delays, minimal validation
                     for attempt in range(2):  # Only 2 attempts for speed
                         try:
                             # Skip most validations for speed - only check if button is disabled
-                            if getattr(button, 'disabled', False):
+                            if getattr(button, "disabled", False):
                                 logger.debug("Airdrop button disabled - drop closed")
                                 break
-                            
-                            # Fast click with minimal timeout
-                            await asyncio.wait_for(button.click(), timeout=2.0)
-                            
-                            logger.info(f"Entered airdrop in {original_message.channel.name}")
+
+                            # Click with reasonable timeout for network latency
+                            await asyncio.wait_for(button.click(), timeout=5.0)
+
+                            logger.info(
+                                f"Entered airdrop in {original_message.channel.name}"
+                            )
                             break  # Success
-                            
+
                         except asyncio.TimeoutError:
                             # Immediate retry on timeout - no sleeping
                             if attempt == 0:  # Only log first timeout
-                                logger.debug("Airdrop click timeout, retrying immediately...")
-                                
+                                logger.debug(
+                                    "Airdrop click timeout, retrying immediately..."
+                                )
+
                         except discord.HTTPException as e:
                             # Fast error handling - no retries for most HTTP errors
                             if "10008" in str(e):  # Unknown Message
                                 logger.debug("Airdrop expired (404)")
-                            elif "50035" in str(e):  # Invalid Form Body  
+                            elif "50035" in str(e):  # Invalid Form Body
                                 logger.debug("Airdrop closed (400)")
                             else:
                                 logger.debug(f"Airdrop HTTP error: {e}")
                             break
-                            
+
                         except discord.ClientException as e:
                             # One immediate retry on client error, then give up
                             if attempt == 0:
                                 logger.debug("Airdrop client error, retrying...")
                             else:
                                 logger.debug(f"Airdrop client error failed: {e}")
-                                
+
                         except Exception as e:
                             logger.debug(f"Airdrop unexpected error: {e}")
                             break
 
-# Phrase drop
-            elif (
-                "phrase drop" in embed.title.lower() and not AIRDROP_DISABLE_PHRASEDROP
-            ):
+            # Phrase drop
+            elif "phrase drop" in embed_title and not AIRDROP_DISABLE_PHRASEDROP:
                 phrase = clean_phrase_comprehensive(embed.description)
                 if phrase:
                     async with original_message.channel.typing():
                         await asyncio.sleep(self.typing_delay(phrase))
                     await original_message.channel.send(phrase)
-                    logger.info(f"Entered phrase drop in {original_message.channel.name}")
+                    logger.info(
+                        f"Entered phrase drop in {original_message.channel.name}"
+                    )
                 else:
-                    logger.warning(f"Failed to extract phrase from embed: {embed.description}")
+                    logger.warning(
+                        f"Failed to extract phrase from embed: {embed.description}"
+                    )
 
             # Math drop
-            elif "math" in embed.title.lower() and not AIRDROP_DISABLE_MATHDROP:
+            elif "math" in embed_title and not AIRDROP_DISABLE_MATHDROP:
                 expr = embed.description.split("`")[1].strip()
                 answer = self.safe_eval_math(expr)
                 if answer is not None:
@@ -1494,7 +2423,7 @@ class JakeyBot(commands.Bot):
                     logger.info(f"Entered math drop in {original_message.channel.name}")
 
             # Trivia drop
-            elif "trivia" in embed.title.lower() and not AIRDROP_DISABLE_TRIVIADROP:
+            elif "trivia" in embed_title and not AIRDROP_DISABLE_TRIVIADROP:
                 category = embed.title.split("Trivia time - ")[1].strip()
                 question = embed.description.replace("**", "").split("*")[1].strip()
 
@@ -1573,16 +2502,6 @@ class JakeyBot(commands.Bot):
                                                 f"Failed to announce trivia answer: {e}"
                                             )
                                         return  # Success, exit function
-                                    except Exception as e:
-                                        logger.debug(
-                                            f"Failed to click trivia button: {e}"
-                                        )
-                                        if (
-                                            attempt < 2
-                                        ):  # Don't sleep on the last attempt
-                                            await asyncio.sleep(
-                                                2**attempt
-                                            )  # Exponential backoff
                                     except asyncio.TimeoutError:
                                         logger.warning(
                                             f"Timeout clicking trivia button (attempt {attempt + 1}/3)"
@@ -1609,10 +2528,15 @@ class JakeyBot(commands.Bot):
                                                 2**attempt
                                             )  # Exponential backoff
                                     except Exception as e:
-                                        logger.error(
-                                            f"Unexpected error clicking trivia button: {e}"
+                                        logger.debug(
+                                            f"Failed to click trivia button: {e}"
                                         )
-                                        return  # Don't retry on unexpected errors
+                                        if (
+                                            attempt < 2
+                                        ):  # Don't sleep on the last attempt
+                                            await asyncio.sleep(
+                                                2**attempt
+                                            )  # Exponential backoff
 
                     # No answer found - try random button as fallback if enabled
                     if (
@@ -1732,7 +2656,7 @@ class JakeyBot(commands.Bot):
                                 )
 
             # Redpacket
-            elif "appeared" in embed.title.lower() and not AIRDROP_DISABLE_REDPACKET:
+            elif "appeared" in embed_title and not AIRDROP_DISABLE_REDPACKET:
                 if tip_cc_message.components:
                     button = tip_cc_message.components[0].children[0]
                     if "envelope" in button.label.lower():
@@ -1771,8 +2695,15 @@ class JakeyBot(commands.Bot):
                                 )
                                 break  # Don't retry on unexpected errors
 
-        except (IndexError, AttributeError, discord.HTTPException, discord.NotFound):
-            logger.debug("Something went wrong while handling drop.")
+        except (
+            IndexError,
+            AttributeError,
+            discord.HTTPException,
+            discord.NotFound,
+        ) as e:
+            logger.warning(
+                f"Error handling drop in {original_message.channel.name}: {type(e).__name__}: {e}"
+            )
             return
 
     def typing_delay(self, text: str) -> float:
@@ -1782,8 +2713,6 @@ class JakeyBot(commands.Bot):
 
     def _validate_trivia_category(self, category: str) -> bool:
         """Validate trivia category to prevent directory traversal and injection attacks."""
-        import re
-
         # Allow alphanumeric characters, spaces, hyphens, underscores, and colons
         # This allows categories like "Entertainment: Music" or "Science: Technology"
         if not re.match(r"^[a-zA-Z0-9\s\-_:]+$", category):
@@ -1904,10 +2833,10 @@ class JakeyBot(commands.Bot):
 
         def eval_expr(node):
             """Recursively evaluate AST nodes."""
-            if isinstance(node, ast.Num):  # <number>
-                return node.n
-            elif isinstance(node, ast.Constant):  # <number> (Python 3.8+)
-                return node.value
+            if isinstance(node, ast.Constant):  # <number> (Python 3.8+)
+                if isinstance(node.value, (int, float)):
+                    return node.value
+                raise TypeError(f"Unsupported constant type: {type(node.value)}")
             elif isinstance(node, ast.BinOp):  # <left> <operator> <right>
                 left = eval_expr(node.left)
                 right = eval_expr(node.right)
@@ -1940,8 +2869,6 @@ class JakeyBot(commands.Bot):
 
     def _extract_drop_value(self, embed) -> Optional[float]:
         """Extract drop value from tip.cc embed."""
-        import re
-
         try:
             # Check embed description for value patterns
             if embed.description:
@@ -2069,8 +2996,76 @@ class JakeyBot(commands.Bot):
                 await welcome_channel.send(full_welcome_message)
         except Exception as e:
             logger.error(f"Error sending welcome message: {e}")
+            # Send a fallback welcome message if AI fails
+            fallback_message = f"Welcome {member.mention} to {member.guild.name}! 🎰💀 Ready to lose some money? Don't forget to pick your roles and join the degenerate casino! EZ money awaits! 🎲💰"
+            await welcome_channel.send(fallback_message)
 
-        return None
+    async def on_guild_join(self, guild):
+        """Handle joining a new guild"""
+        logger.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
+        # Check and save permissions for this guild
+        await self._check_and_save_permissions(guild)
+
+    async def _check_and_save_permissions(self, target_guild=None):
+        """
+        Check bot permissions in guilds and save to memory.
+        If target_guild is provided, only check that guild.
+        Otherwise check all guilds.
+        """
+        try:
+            guilds_to_check = [target_guild] if target_guild else self.guilds
+
+            for guild in guilds_to_check:
+                try:
+                    # Get bot member in guild
+                    me = guild.me
+                    if me is None:
+                        continue
+                    permissions = me.guild_permissions
+
+                    # Format permissions string
+                    perms_list = []
+                    if permissions.administrator:
+                        perms_list.append("ADMINISTRATOR")
+                    else:
+                        if permissions.manage_messages:
+                            perms_list.append("MANAGE_MESSAGES")
+                        if permissions.kick_members:
+                            perms_list.append("KICK_MEMBERS")
+                        if permissions.ban_members:
+                            perms_list.append("BAN_MEMBERS")
+                        if permissions.moderate_members:
+                            perms_list.append("MODERATE_MEMBERS")  # Timeout
+                        if permissions.view_audit_log:
+                            perms_list.append("VIEW_AUDIT_LOG")
+                        if permissions.manage_channels:
+                            perms_list.append("MANAGE_CHANNELS")
+                        if permissions.manage_roles:
+                            perms_list.append("MANAGE_ROLES")
+                        if permissions.mention_everyone:
+                            perms_list.append("MENTION_EVERYONE")
+                        if permissions.send_messages:
+                            perms_list.append("SEND_MESSAGES")
+
+                    if not perms_list:
+                        perms_list.append("NONE_SIGNIFICANT")
+
+                    perms_str = ", ".join(perms_list)
+                    info = f"Permissions in server '{guild.name}' (ID: {guild.id}): {perms_str}"
+
+                    # Save to bot's memory (using bot's own ID)
+                    # We store it as a 'fact' type memory for the bot user
+                    if self.user:
+                        self.db.add_memory(str(self.user.id), "bot_permissions", info)
+                        logger.info(f"Saved permissions for {guild.name}: {perms_str}")
+
+                except Exception as e:
+                    logger.warning(
+                        f"Error checking permissions for guild {guild.name if hasattr(guild, 'name') else 'unknown'}: {e}"
+                    )
+
+        except Exception as e:
+            logger.error(f"Error in _check_and_save_permissions: {e}")
 
     def _trim_messages_for_api(self, messages, max_chars=6000):
         """Trim messages to fit within API character limits by removing older messages."""
@@ -2195,10 +3190,8 @@ class JakeyBot(commands.Bot):
             ]
 
             # Use the AI provider manager for automatic failover
-            from ai.ai_provider_manager import SimpleAIProviderManager
-
             if not hasattr(self, "_ai_manager"):
-                self._ai_manager = SimpleAIProviderManager()
+                self._ai_manager = ai_provider_manager
 
             response = await self._ai_manager.generate_text(
                 messages=messages,
@@ -2210,8 +3203,6 @@ class JakeyBot(commands.Bot):
             if response and "choices" in response and len(response["choices"]) > 0:
                 welcome_content = response["choices"][0]["message"]["content"]
                 # Remove <functions>...</functions> tool call patterns
-                import re
-
                 welcome_content = re.sub(
                     r"<functions>.*?</functions>",
                     "",
@@ -2225,7 +3216,10 @@ class JakeyBot(commands.Bot):
 
         except Exception as e:
             logger.error(f"Error generating welcome message: {e}")
-            return None
+            # Return a fallback welcome message if AI fails
+            fallback_message = f"Welcome {member.name} to {member.guild.name}! 🎰💀 Ready to lose some money? Don't forget to pick your roles and join the degenerate casino! EZ money awaits! 🎲💰"
+            logger.info(f"Using fallback welcome message for {member.name}")
+            return fallback_message
 
     def _schedule_fallback_restoration(self):
         """Schedule automatic restoration to Pollinations after OpenRouter fallback timeout."""
@@ -2248,64 +3242,7 @@ class JakeyBot(commands.Bot):
             self, "_original_model_before_fallback", self.current_model
         )
 
-        # Schedule the restoration task
-        self.fallback_restore_task = asyncio.create_task(
-            self._restore_to_pollinations_after_timeout()
-        )
-
-        logger.info(
-            f"Scheduled restoration to Pollinations after {OPENROUTER_FALLBACK_TIMEOUT} seconds"
-        )
-
-    async def _restore_to_pollinations_after_timeout(self):
-        """Background task to restore to Pollinations after timeout."""
-        from config import DEFAULT_MODEL, OPENROUTER_FALLBACK_TIMEOUT
-
-        try:
-            # Wait for the timeout period
-            await asyncio.sleep(OPENROUTER_FALLBACK_TIMEOUT)
-
-            # Check if we're still using OpenRouter
-            if self.current_api_provider != "openrouter":
-                logger.debug("Not using OpenRouter anymore, skipping restoration")
-                return
-
-            # Check if Pollinations is healthy now
-            try:
-                pollinations_health = await asyncio.to_thread(
-                    self.pollinations_api.check_service_health
-                )
-                if not pollinations_health.get("healthy", False):
-                    logger.info(
-                        "Pollinations still unhealthy, keeping OpenRouter fallback"
-                    )
-                    # Reschedule restoration for later
-                    self._schedule_fallback_restoration()
-                    return
-            except Exception as e:
-                logger.warning(f"Failed to check Pollinations health: {e}")
-                # Reschedule restoration for later
-                self._schedule_fallback_restoration()
-                return
-
-            # Restore to Pollinations
-            original_model = self.original_model_before_fallback or DEFAULT_MODEL
-            self.current_api_provider = "pollinations"
-            self.current_model = original_model
-            self.openrouter_fallback_start_time = None
-            self.original_model_before_fallback = None
-
-            logger.info(
-                f"✅ Restored to Pollinations with model {original_model} after {OPENROUTER_FALLBACK_TIMEOUT} seconds"
-            )
-
-            # Optionally send a notification to a log channel or admin
-            # This could be configured later if needed
-
-        except asyncio.CancelledError:
-            logger.debug("Fallback restoration task cancelled")
-        except Exception as e:
-            logger.error(f"Error in fallback restoration task: {e}")
+        logger.info(f"Switched to OpenRouter as the only provider")
 
     def cancel_fallback_restoration(self):
         """Cancel any pending fallback restoration task."""
@@ -2318,27 +3255,13 @@ class JakeyBot(commands.Bot):
 
     def get_fallback_status(self) -> Dict[str, Any]:
         """Get current fallback restoration status."""
-        from config import OPENROUTER_FALLBACK_TIMEOUT
-
         status = {
-            "current_provider": self.current_api_provider,
+            "current_provider": self.current_api_provider or "openrouter",
             "current_model": self.current_model,
-            "is_fallback_active": self.current_api_provider == "openrouter",
-            "fallback_start_time": self.openrouter_fallback_start_time,
-            "original_model": self.original_model_before_fallback,
+            "is_fallback_active": False,
+            "fallback_start_time": None,
+            "original_model": None,
         }
-
-        if self.openrouter_fallback_start_time:
-            elapsed = time.time() - self.openrouter_fallback_start_time
-            remaining = max(0, OPENROUTER_FALLBACK_TIMEOUT - elapsed)
-            status.update(
-                {
-                    "fallback_elapsed_seconds": elapsed,
-                    "fallback_remaining_seconds": remaining,
-                    "fallback_progress_percent": (elapsed / OPENROUTER_FALLBACK_TIMEOUT)
-                    * 100,
-                }
-            )
 
         return status
 
@@ -2365,8 +3288,6 @@ class JakeyBot(commands.Bot):
         """
         try:
             channel_id = command_data.get("channel_id")
-            content = command_data.get("content")
-            author_id = command_data.get("author_id")
             command_name = command_data.get("command_name")
             args = command_data.get("args", [])
 
@@ -3064,11 +3985,14 @@ class JakeyBot(commands.Bot):
             elif command_name == "ind_addr":
                 # Generate a random Indian name and address
                 try:
-                    from utils.random_indian_generator import random_indian_generator
+                    from utils.random_indian_generator import (
+                        generate_random_address,
+                        generate_random_name,
+                    )
 
                     # Generate random name and address
-                    name = random_indian_generator.generate_random_name()
-                    address = random_indian_generator.generate_random_address()
+                    name = generate_random_name()
+                    address = generate_random_address()
 
                     # Format the response to match preferred output
                     response = f"**🇮🇳 Random Indian Identity Generator**\n\n"
@@ -3105,13 +4029,13 @@ class JakeyBot(commands.Bot):
                                     channel,
                                     "❌ Please provide a count between 1 and 10!",
                                 )
-                                return
+                                return False
                         except ValueError:
                             await self._safe_send_message(
                                 channel,
                                 "❌ Please provide a valid number between 1 and 10!",
                             )
-                            return
+                            return False
                     else:
                         # Generate a random count between 3 and 10 if not provided
                         count = random.randint(3, 10)
@@ -3313,15 +4237,25 @@ class JakeyBot(commands.Bot):
                     return True
 
                 try:
-                    # Clear various caches
-                    if hasattr(self, "_command_cache"):
-                        self._command_cache.clear()
-                    if hasattr(self, "_user_cache"):
-                        self._user_cache.clear()
+                    # Clear various caches safely
+                    caches_to_clear = ["_command_cache", "_user_cache"]
+                    cleared_count = 0
+
+                    for cache_name in caches_to_clear:
+                        if hasattr(self, cache_name):
+                            cache = getattr(self, cache_name)
+                            if cache is not None:
+                                try:
+                                    # Try to call clear() if the method exists
+                                    if hasattr(cache, "clear"):
+                                        cache.clear()
+                                        cleared_count += 1
+                                except Exception as e:
+                                    logger.warning(f"Could not clear {cache_name}: {e}")
 
                     await self._safe_send_message(
                         channel,
-                        "**🧹 Cache cleared successfully!**\n\n✅ Command cache cleared\n✅ User cache cleared\n✅ Memory cache cleared\n\n*Bot should run faster now!* ⚡",
+                        f"**🧹 Cache cleared successfully!**\n\n✅ Cleared {cleared_count} cache(s)\n\n*Bot should run faster now!* ⚡",
                     )
                 except Exception as e:
                     logger.error(f"Error clearing cache: {e}")
@@ -3329,6 +4263,151 @@ class JakeyBot(commands.Bot):
                         channel,
                         f"💀 **Error clearing cache:** {sanitize_error_message(str(e))}",
                     )
+                return True
+
+            elif command_name == "testrepetition":
+                # Test repetition detection (admin only)
+                author_id = command_data.get("author_id")
+                if not author_id or not is_admin(author_id):
+                    await self._safe_send_message(channel, "💀 **Admin only command!**")
+                    return True
+
+                # Show current response history for debugging
+                test_user_id = args[0] if args else author_id
+                user_history = list(
+                    response_uniqueness.user_responses.get(str(test_user_id), [])
+                )
+
+                response = f"**🧪 Repetition Detection Debug**\n\n"
+                response += f"📍 User ID: `{test_user_id}`\n"
+                response += f"📊 History Size: `{len(user_history)} responses`\n\n"
+
+                if user_history:
+                    response += f"**📜 Recent Bot Responses:**\n"
+                    for idx, resp in enumerate(user_history[-5:], 1):
+                        preview = resp[:100] + "..." if len(resp) > 100 else resp
+                        response += f"`{idx}. {preview}`\n"
+                else:
+                    response += f"*No response history found for this user*\n"
+
+                response += f"\n**🔍 Test Current Response:**\n"
+                # Get the most recent AI response if available (store for testing)
+                response += f"To test similarity, provide a response to check with testrepetition check <text>\n"
+                response += f"Current system threshold: 80% similarity\n"
+
+                await self._safe_send_message(channel, response)
+                return True
+
+            elif command_name == "checkrepetition":
+                # Check if a given text would be flagged as repetitive (admin only)
+                author_id = command_data.get("author_id")
+                if not author_id or not is_admin(author_id):
+                    await self._safe_send_message(channel, "💀 **Admin only command!**")
+                    return True
+
+                if not args:
+                    await self._safe_send_message(
+                        channel,
+                        "💀 **Usage:** `checkrepetition <user_id> <text to check>`\n\nExample: `checkrepetition 123456 Hello, how are you today?`",
+                    )
+                    return True
+
+                test_user_id = args[0]
+                test_text = " ".join(args[1:])
+
+                if len(test_text.strip().split()) < 3:
+                    await self._safe_send_message(
+                        channel,
+                        "💀 **Text must be at least 3 words to check for repetition**",
+                    )
+                    return True
+
+                # Check repetition
+                is_repetitive, reason = response_uniqueness.is_repetitive_response(
+                    str(test_user_id), test_text
+                )
+
+                # Get detailed similarity scores
+                user_history = list(
+                    response_uniqueness.user_responses.get(str(test_user_id), [])
+                )
+                recent_responses = user_history[-5:]
+
+                similarity_scores = []
+                for resp in recent_responses:
+                    similarity = response_uniqueness._get_jaccard_similarity(
+                        test_text, resp
+                    )
+                    similarity_scores.append(
+                        (similarity, resp[:50] if len(resp) > 50 else resp)
+                    )
+
+                # Build response
+                response = f"**🔍 Repetition Check Results**\n\n"
+                response += f"📝 Text: `{test_text[:100]}{'...' if len(test_text) > 100 else ''}`\n"
+                response += f"📍 User ID: `{test_user_id}`\n"
+                response += f"📊 History Size: `{len(user_history)}` responses\n\n"
+
+                if is_repetitive:
+                    response += f"🚨 **REPETITIVE DETECTED**\n"
+                    response += f"📌 Reason: `{reason}`\n\n"
+                else:
+                    response += f"✅ **NOT REPETITIVE**\n\n"
+
+                response += f"**📈 Similarity Scores:**\n"
+                if similarity_scores:
+                    for idx, (score, preview) in enumerate(similarity_scores, 1):
+                        status = "⚠️" if score >= 0.8 else "✅"
+                        response += f"`{idx}. {status} {score:.1%}` - `{preview}`\n"
+                else:
+                    response += f"*No previous responses to compare*\n"
+
+                await self._safe_send_message(channel, response)
+                return True
+
+            elif command_name == "clearrephistory":
+                # Clear response history for a user (admin only)
+                admin_author_id = command_data.get("author_id")
+                if not admin_author_id or not is_admin(admin_author_id):
+                    await self._safe_send_message(channel, "💀 **Admin only command!**")
+                    return True
+
+                if not args:
+                    await self._safe_send_message(
+                        channel,
+                        "💀 **Usage:** `clearrephistory <user_id>`\n\nClears all stored bot responses for a user so repetition detection starts fresh.\nExample: `clearrephistory 123456`",
+                    )
+                    return True
+
+                target_user_id = args[0]
+
+                # Clear user's response history
+                before_count = len(
+                    response_uniqueness.user_responses.get(str(target_user_id), [])
+                )
+                before_hash_count = len(
+                    response_uniqueness.response_hashes.get(str(target_user_id), set())
+                )
+
+                response_uniqueness.user_responses[str(target_user_id)].clear()
+                response_uniqueness.response_hashes[str(target_user_id)].clear()
+
+                after_count = len(
+                    response_uniqueness.user_responses.get(str(target_user_id), [])
+                )
+                after_hash_count = len(
+                    response_uniqueness.response_hashes.get(str(target_user_id), set())
+                )
+
+                response = f"**🧹 Cleared Response History**\n\n"
+                response += f"📍 User ID: `{target_user_id}`\n"
+                response += f"📊 Responses: `{before_count}` → `{after_count}`\n"
+                response += (
+                    f"🔐 Hashes: `{before_hash_count}` → `{after_hash_count}`\n\n"
+                )
+                response += f"✅ **Repetition detection reset for this user!**"
+
+                await self._safe_send_message(channel, response)
                 return True
 
             elif command_name == "image":
@@ -3696,13 +4775,20 @@ class JakeyBot(commands.Bot):
                 if not args:
                     await self._safe_send_message(
                         channel,
-                        "💀 **Usage:** `model <model_name>`\n\n**Available Models:**\n• `pollinations` - Default chat model\n• `gpt4` - Advanced reasoning\n• `claude` - Helpful assistant\n• `openrouter` - Premium models\n\nExample: `model gpt4`",
+                        "💀 **Usage:** `model <model_name>`\n\n**Available Models:**\n• `nvidia/nemotron-nano-9b-v2:free` - Fast and reliable\n• `deepseek/deepseek-chat-v3.1:free` - Advanced reasoning\n• `meta-llama/llama-3.3-70b-instruct:free` - Large context\n\nExample: `model nvidia/nemotron-nano-9b-v2:free`",
                     )
                     return True
 
                 try:
                     model_name = args[0].lower()
-                    available_models = ["pollinations", "gpt4", "claude", "openrouter"]
+                    available_models = [
+                        "nvidia/nemotron-nano-9b-v2:free",
+                        "deepseek/deepseek-chat-v3.1:free",
+                        "deepseek/deepseek-r1:free",
+                        "meta-llama/llama-3.3-70b-instruct:free",
+                        "meta-llama/llama-3.2-3b-instruct:free",
+                        "mistralai/mistral-small-3.2-24b-instruct:free",
+                    ]
 
                     if model_name not in available_models:
                         await self._safe_send_message(
@@ -4138,8 +5224,8 @@ class JakeyBot(commands.Bot):
                     await self._safe_send_message(
                         channel, f"💀 **Queue processing error:** {str(e)}"
                     )
-            except:
-                pass
+            except Exception as send_error:
+                logger.debug(f"Failed to send error message to channel: {send_error}")
             return False
 
     async def process_queued_ai_message(self, message_data: dict) -> bool:
@@ -4147,19 +5233,24 @@ class JakeyBot(commands.Bot):
         Process a queued AI generation message.
 
         Args:
-            message_data: Dictionary containing AI message information
+            message_data: Dictionary containing message information
 
         Returns:
             True if message was processed successfully, False otherwise
         """
         try:
             channel_id = message_data.get("channel_id")
-            prompt = message_data.get("prompt")
+            content = message_data.get("content")
+            prompt = message_data.get("prompt", "")
             generation_type = message_data.get("generation_type", "text")
-            author_id = message_data.get("author_id")
+
+            # Validate channel_id
+            if channel_id is None:
+                logger.error("No channel_id in queued AI generation message")
+                return False
 
             # Get the channel
-            channel = self.get_channel(channel_id)
+            channel = self.get_channel(int(channel_id))
             if not channel:
                 logger.error(
                     f"Could not find channel {channel_id} for queued AI generation"
@@ -4169,17 +5260,21 @@ class JakeyBot(commands.Bot):
             # Process AI generation based on type
             if generation_type == "text":
                 # This would integrate with the existing AI processing logic
-                logger.info(f"Processing queued text generation: {prompt[:50]}...")
+                prompt_preview = prompt[:50] if prompt else ""
+                logger.info(f"Processing queued text generation: {prompt_preview}...")
                 # For now, just send a placeholder response
+                prompt_display = prompt[:100] if prompt else ""
                 await self._safe_send_message(
-                    channel, f"🔄 Queued AI response to: {prompt[:100]}..."
+                    channel, f"🔄 Queued AI response to: {prompt_display}..."
                 )
 
             elif generation_type == "image":
-                logger.info(f"Processing queued image generation: {prompt[:50]}...")
+                prompt_preview = prompt[:50] if prompt else ""
+                logger.info(f"Processing queued image generation: {prompt_preview}...")
                 # This would integrate with image generation
+                prompt_display = prompt[:100] if prompt else ""
                 await self._safe_send_message(
-                    channel, f"🎨 Queued image generation for: {prompt[:100]}..."
+                    channel, f"🎨 Queued image generation for: {prompt_display}..."
                 )
 
             return True

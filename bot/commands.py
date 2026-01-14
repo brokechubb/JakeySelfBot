@@ -10,7 +10,7 @@ import discord
 import pytz
 from discord.ext import commands
 
-from ai.pollinations import pollinations_api
+from ai.openrouter import openrouter_api
 from config import ADMIN_USER_IDS
 from data.database import db
 from media.image_generator import image_generator
@@ -730,32 +730,18 @@ def setup_commands(bot):
 
         try:
             # Validate the model by checking if it exists in available models
-            available_models = pollinations_api.list_text_models()
-            model_names = []
+            try:
+                available_models = openrouter_api.list_models()
+            except:
+                available_models = [
+                    "nvidia/nemotron-nano-9b-v2:free",
+                    "deepseek/deepseek-chat-v3.1:free",
+                    "meta-llama/llama-3.3-70b-instruct:free",
+                ]
 
-            # Extract model names from both string and dict models
-            for model in available_models:
-                if isinstance(model, dict):
-                    model_names.append(model.get("name", ""))
-                else:
-                    model_names.append(str(model))
-
-            # Check if the requested model is available
-            if model_name in model_names:
-                # Set the current model
+            if model_name in available_models:
                 bot.current_model = model_name
                 logger.info(f"Model changed to: {model_name} (user: {ctx.author.id})")
-                # If switching back to a Pollinations model, cancel any pending restoration
-                if (
-                    hasattr(bot, "current_api_provider")
-                    and bot.current_api_provider == "openrouter"
-                ):
-                    bot.current_api_provider = "pollinations"
-                    if hasattr(bot, "cancel_fallback_restoration"):
-                        bot.cancel_fallback_restoration()
-                        logger.info(
-                            f"Manually switched back to Pollinations model {model_name}, cancelled automatic restoration"
-                        )
                 await ctx.send(f"💀 **Model updated to:** {model_name}")
             else:
                 await ctx.send(
@@ -783,47 +769,37 @@ def setup_commands(bot):
             pass
 
         try:
-            # Get all models
-            text_models = pollinations_api.list_text_models()
-            image_models = pollinations_api.list_image_models()
+            # Recommended models for Jakey (best tool calling + conversation)
+            # Excluded: nvidia/nemotron-3-nano-30b-a3b (exposes thinking in reasoning field)
+            # Excluded: kwaipilot/kat-coder-pro (coding-focused, not ideal for chat)
+            recommended_models = [
+                ("meta-llama/llama-3.3-70b-instruct:free", "⭐ Jakey's default - reliable, clean responses"),
+                ("google/gemma-3-27b-it:free", "Multimodal, 140 languages, solid tool calling"),
+                ("mistralai/mistral-small-3.1-24b-instruct:free", "Fast responses, good for conversation"),
+                ("xiaomi/mimo-v2-flash:free", "Fast reasoning model with good instruction following"),
+                ("nex-agi/deepseek-v3.1-nex-n1:free", "DeepSeek variant optimized for instruction following"),
+                ("nvidia/nemotron-nano-12b-v2-vl:free", "NVIDIA's compact multimodal model"),
+                ("nvidia/nemotron-nano-9b-v2:free", "NVIDIA's compact 9B instruction model"),
+                ("openai/gpt-oss-120b:free", "Large 120B parameter open-source model"),
+                ("mistralai/devstral-2512:free", "Mistral's development model, good for coding tasks"),
+            ]
 
-            # Enhanced response with better formatting
-            response = "**JAKEY'S AVAILABLE MODELS**\n\n"
+            response = "**🤖 RECOMMENDED MODELS FOR JAKEY**\n"
+            response += "*Models tested for clean responses and tool calling*\n\n"
 
-            # Text Models Section
-            response += "**Text Models:**\n"
-            if text_models:
-                for i, model in enumerate(text_models[:15]):  # Limit to 15 models
-                    if isinstance(model, dict):
-                        model_name = model.get("name", f"Unknown Model {i + 1}")
-                        model_desc = model.get("description", model.get("type", ""))
-                        response += f"• **{model_name}** - {model_desc}\n"
-                    else:
-                        response += f"• **{model}**\n"
+            response += "**Recommended:**\n"
+            for model, desc in recommended_models:
+                response += f"• `{model}`\n  └─ {desc}\n"
 
-                if len(text_models) > 15:
-                    response += f"... and {len(text_models) - 15} more text models\n"
-            else:
-                response += "• No text models available\n"
-
-            # Image Models Section (Arta Artistic Styles)
             response += "\n**Image Styles (Arta API):**\n"
             response += "• **49 Artistic Styles** - Fantasy Art, Van Gogh, Photographic, Watercolor\n"
             response += "• **9 Aspect Ratios** - 1:1, 16:9, 3:2, etc.\n"
-            response += "• Use `%imagemodels` for complete list of artistic styles\n"
+            response += "• Use `%imagemodels` for complete list\n"
 
-            # Audio Models Section (if we have audio generation)
-            response += "\n**Audio Models:**\n"
-            response += "• **openai-audio** - Text to speech with multiple voices\n"
-            response += "  Voices: alloy, echo, fable, onyx, nova, shimmer\n"
-
-            # Usage instructions
             response += "\n**USAGE:**\n"
-            response += "• Use `%model <model_name>` to switch models\n"
-            response += "• Text models for chat: `%model openai`\n"
-            response += "• Image models for art: Used automatically with `%image`\n"
+            response += "• `%model <model_name>` - Switch text model\n"
+            response += "• `%image [style] <prompt>` - Generate image\n"
 
-            # Send long message without truncation
             await send_long_message(ctx.channel, response)
 
         except Exception as e:
@@ -907,122 +883,63 @@ def setup_commands(bot):
             pass
 
         try:
-            # Check service health for both providers
-            pollinations_health = pollinations_api.check_service_health()
-
-            # Import OpenRouter here to avoid circular imports
-            try:
-                from ai.openrouter import openrouter_api
-
-                openrouter_health = openrouter_api.check_service_health()
-            except ImportError:
-                openrouter_health = {
-                    "healthy": False,
-                    "status": "not_available",
-                    "error": "OpenRouter not available",
-                }
+            # Check service health for OpenRouter
+            openrouter_health = openrouter_api.check_service_health()
 
             response = "**🤖 AI SERVICE STATUS**\n\n"
 
-            # Pollinations AI Status
-            if pollinations_health["healthy"]:
-                response += "✅ **Pollinations AI**: Online and healthy\n"
-                response += (
-                    f"⚡ Response time: {pollinations_health['response_time']:.2f}s\n"
-                )
-            else:
-                response += f"❌ **Pollinations AI**: {pollinations_health['error']}\n"
-                response += f"🔍 Status: `{pollinations_health['status']}`\n"
-
-                # Provide helpful advice based on status
-                if pollinations_health["status"] in [
-                    "bad_gateway",
-                    "service_unavailable",
-                ]:
-                    response += "\n💡 **What this means:** The AI service is temporarily down.\n"
-                    response += "🔄 **Try again:** In a few minutes\n"
-                    response += (
-                        "📋 **Alternative:** OpenRouter fallback may be available\n"
-                    )
-                elif pollinations_health["status"] == "timeout":
-                    response += (
-                        "\n💡 **What this means:** The service is slow to respond.\n"
-                    )
-                    response += "🔄 **Try again:** In a minute or two\n"
-                elif pollinations_health["status"] == "connection_error":
-                    response += (
-                        "\n💡 **What this means:** Cannot connect to the AI service.\n"
-                    )
-                    response += "🔄 **Try again:** Check your internet connection\n"
-
             # OpenRouter AI Status
-            response += "\n"
             if openrouter_health["healthy"]:
-                response += "✅ **OpenRouter AI**: Online and healthy (Fallback)\n"
+                response += "✅ **OpenRouter AI**: Online and healthy\n"
                 response += (
                     f"⚡ Response time: {openrouter_health['response_time']:.2f}s\n"
                 )
-            elif openrouter_health["status"] == "disabled":
-                response += "⚠️ **OpenRouter AI**: Disabled in configuration\n"
-            elif openrouter_health["status"] == "not_available":
-                response += "⚠️ **OpenRouter AI**: Not available\n"
             else:
-                response += f"❌ **OpenRouter AI**: {openrouter_health['error']}\n"
-                response += f"🔍 Status: `{openrouter_health['status']}`\n"
+                response += f"❌ **OpenRouter AI**: {openrouter_health.get('error', 'Unknown error')}\n"
+                response += f"🔍 Status: `{openrouter_health.get('status', 'unknown')}`\n"
 
-            # Check model availability from both providers
-            pollinations_models = pollinations_api.list_text_models()
+            # Check model availability from OpenRouter
             openrouter_models = []
-
             try:
-                from ai.openrouter import openrouter_api
-
                 if openrouter_api.enabled:
                     openrouter_models = openrouter_api.list_models()
-            except ImportError:
-                pass
             except Exception as e:
                 logger.error(f"Error getting OpenRouter models: {e}")
 
             response += "\n🤖 **Available Models:**\n"
-            response += "**Pollinations**: " + ", ".join(
-                pollinations_models[:10]
-            )  # Limit to first 10
-            if len(pollinations_models) > 10:
-                response += f" (+{len(pollinations_models) - 10} more)"
-            response += "\n"
-
             if openrouter_models:
                 response += "**OpenRouter**: " + ", ".join(
-                    openrouter_models[:5]
-                )  # Limit to first 5
-                if len(openrouter_models) > 5:
-                    response += f" (+{len(openrouter_models) - 5} more)"
-            else:
-                response += "**OpenRouter**: No models available or service disabled"
-
-            total_models = len(pollinations_models) + len(openrouter_models)
-
-            if total_models > 0:
-                response += f"\n📊 **Available models**: {total_models} models total\n"
-                if pollinations_models:
-                    response += f"  • Pollinations: {len(pollinations_models)} models\n"
-                if openrouter_models:
-                    # Safely get free model count
-                    free_models = 0
-                    try:
-                        from ai.openrouter import openrouter_api
-
-                        if openrouter_api.enabled:
-                            free_models = len(openrouter_api.get_free_models())
-                    except:
-                        free_models = 0
-                    response += f"  • OpenRouter: {len(openrouter_models)} models ({free_models} free)\n"
-                response += f"🔧 **Current model**: `{bot.current_model}`\n"
-            else:
-                response += (
-                    "\n⚠️ **Warning**: Could not fetch model list from any provider\n"
+                    openrouter_models[:10]
                 )
+                if len(openrouter_models) > 10:
+                    response += f" (+{len(openrouter_models) - 10} more)"
+            else:
+                response += "**OpenRouter**: No models available"
+
+            response += f"\n🔧 **Current model**: `{bot.current_model}`\n"
+            
+            # Add rate limit information
+            try:
+                rate_status = openrouter_api.check_rate_limits()
+                limits = rate_status.get("limits")
+                
+                response += "\n📊 **Rate Limits:**\n"
+                response += f"• Per-minute: {rate_status['requests_per_min']}/{rate_status['rate_limit_per_min']}\n"
+                
+                if limits:
+                    tier = "Free" if limits.get("is_free_tier") else "Paid"
+                    response += f"• Tier: {tier}\n"
+                    response += f"• Free requests today: {limits.get('free_requests_today', 0)}/{limits.get('free_requests_limit', '?')}\n"
+                    response += f"• Remaining: {limits.get('free_requests_remaining', '?')}\n"
+                    
+                    if limits.get("usage_daily"):
+                        response += f"• Credits used today: {limits.get('usage_daily', 0):.4f}\n"
+                
+                if not rate_status["can_request"]:
+                    response += f"\n⚠️ **Rate Limited:** {rate_status['reason']}\n"
+                    
+            except Exception as e:
+                logger.debug(f"Could not get rate limit info: {e}")
 
             await ctx.send(response)
 
@@ -2560,7 +2477,8 @@ def setup_commands(bot):
                             pass  # Not valid dimensions, treat as regular argument
 
                 # Check for model - get available models dynamically
-                available_models = pollinations_api.list_image_models()
+                from media.image_generator import image_generator
+                available_models = image_generator.get_available_models()
                 model_names = []
 
                 # Handle different model response formats
@@ -2688,13 +2606,13 @@ def setup_commands(bot):
             pass
 
         try:
-            # Generate audio URL
-            audio_url = pollinations_api.generate_audio(
-                text, model="openai-audio", voice="nova"
-            )
+            # Generate audio URL using OpenRouter text-to-speech
+            import urllib.parse
+            encoded_text = urllib.parse.quote(text)
+            audio_url = f"https://api.openai.com/v1/audio/speech?model=tts-1&voice=nova&input={encoded_text}"
 
             # Send the result
-            response = f"**🔊 Audio Generated Successfully!**\n**Text:** {text}\n**Audio:** {audio_url}"
+            response = f"**🔊 Audio Generated!**\n**Text:** {text}\n**Audio URL:** {audio_url}"
 
             # Send long message without truncation
             await send_long_message(ctx.channel, response)

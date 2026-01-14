@@ -194,12 +194,10 @@ def main():
         try:
             logger.info(f"🔌 Attempting to connect to Discord...")
             # Run the bot with improved error handling
+            # bot.start() handles login + connect and runs until disconnection
             loop.run_until_complete(bot.start(DISCORD_TOKEN))
             reconnect_delay = 1.0  # Reset delay on successful connection
             logger.info("Connected to Discord")
-
-            # Run the bot until it's disconnected
-            loop.run_until_complete(bot.connect())
 
         except KeyboardInterrupt:
             logger.info("🛑 Bot stopped by user")

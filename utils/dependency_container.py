@@ -6,17 +6,15 @@ from dataclasses import dataclass
 import sys
 from pathlib import Path
 
-# Add tools and data directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ai.pollinations import pollinations_api, PollinationsAPI
+from ai.openrouter import openrouter_api, OpenRouterAPI
 from data.database import db, DatabaseManager
 from tools.tool_manager import tool_manager, ToolManager
 from utils.tipcc_manager import TipCCManager
 from tools.mcp_memory_client import MCPMemoryClient
 from typing import Optional, Any
 
-# Import memory backend
 try:
     from memory import memory_backend
 except ImportError:
@@ -28,7 +26,7 @@ class BotDependencies:
     """Container for all bot dependencies"""
     database: DatabaseManager
     tool_manager: ToolManager
-    ai_client: PollinationsAPI
+    ai_client: OpenRouterAPI
     discord_token: str
     tipcc_manager: Optional[TipCCManager] = None
     mcp_memory_client: Optional[MCPMemoryClient] = None
@@ -38,17 +36,14 @@ class BotDependencies:
     @classmethod
     def create_defaults(cls, discord_token: str) -> 'BotDependencies':
         """Factory method to create default dependencies"""
-        # Create a placeholder TipCCManager that will be initialized later
-        tipcc_manager = None  # Will be initialized properly after bot is created
-        
-        # Create MCP memory client if enabled
+        tipcc_manager = None
         from config import MCP_MEMORY_ENABLED
         mcp_memory_client = MCPMemoryClient() if MCP_MEMORY_ENABLED else None
         
         return cls(
             database=db,
             tool_manager=tool_manager,
-            ai_client=pollinations_api,
+            ai_client=openrouter_api,
             tipcc_manager=tipcc_manager,
             mcp_memory_client=mcp_memory_client,
             memory_backend=memory_backend,
@@ -56,7 +51,6 @@ class BotDependencies:
         )
 
 
-# Global dependency container
 _deps: Optional[BotDependencies] = None
 
 def get_dependencies() -> BotDependencies:

@@ -1,4 +1,9 @@
-"""Test async pollinations implementation"""
+"""Test async AI implementations
+
+NOTE: Pollinations API has been deprecated and removed.
+These tests are skipped but kept for reference.
+The async AI functionality is now handled by ai_provider_manager.
+"""
 import asyncio
 import sys
 import os
@@ -8,11 +13,18 @@ from unittest.mock import Mock, AsyncMock, patch
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from ai.async_pollinations import pollinations_async_api
+# Try to import async Pollinations, skip if not available (deprecated)
+try:
+    from ai.async_pollinations import pollinations_async_api
+    ASYNC_POLLINATIONS_AVAILABLE = True
+except ImportError:
+    ASYNC_POLLINATIONS_AVAILABLE = False
+    pollinations_async_api = None
 
 
+@unittest.skipUnless(ASYNC_POLLINATIONS_AVAILABLE, "Async Pollinations API has been deprecated and removed")
 class TestAsyncPollinations(unittest.TestCase):
-    """Test cases for async pollinations functionality"""
+    """Test cases for async pollinations functionality (DEPRECATED)"""
 
     def test_async_text_generation(self):
         """Test async text generation"""
@@ -121,28 +133,26 @@ class TestAsyncPollinations(unittest.TestCase):
             self.assertIsNone(url)
 
 
-# Keep the original main function for standalone execution
-async def main():
-    """Run all tests"""
-    print("Running async pollinations tests...")
+class TestAIProviderManager(unittest.TestCase):
+    """Test cases for the AI Provider Manager (current async implementation)"""
     
-    try:
-        # Create test instance
-        test_instance = TestAsyncPollinations()
-        
-        # Run tests
-        await test_instance.test_async_text_generation()
-        await test_instance.test_async_text_generation_error()
-        await test_instance.test_async_image_generation()
-        await test_instance.test_async_image_generation_error()
-        
-        print("All tests passed!")
-        return True
-    except Exception as e:
-        print(f"Test failed with exception: {e}")
-        return False
+    def test_provider_manager_import(self):
+        """Test that AI provider manager can be imported"""
+        from ai.ai_provider_manager import ai_provider_manager
+        self.assertIsNotNone(ai_provider_manager)
+    
+    def test_generate_text_is_async(self):
+        """Test that generate_text is an async method"""
+        from ai.ai_provider_manager import ai_provider_manager
+        import inspect
+        self.assertTrue(inspect.iscoroutinefunction(ai_provider_manager.generate_text))
+    
+    def test_generate_image_is_async(self):
+        """Test that generate_image is an async method"""
+        from ai.ai_provider_manager import ai_provider_manager
+        import inspect
+        self.assertTrue(inspect.iscoroutinefunction(ai_provider_manager.generate_image))
 
 
 if __name__ == "__main__":
-    success = asyncio.run(main())
-    sys.exit(0 if success else 1)
+    unittest.main()

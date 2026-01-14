@@ -124,7 +124,7 @@ class TriviaManager:
         2. Cached external source
         3. Live external source fetch
         """
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
 
         try:
             # Use a shorter timeout for the entire operation to prevent blocking
@@ -142,7 +142,7 @@ class TriviaManager:
             return None
         finally:
             # Record attempt statistics
-            elapsed_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
+            elapsed_ms = int((asyncio.get_running_loop().time() - start_time) * 1000)
             # We'll record this when we have question_id from successful lookup
 
     async def _find_trivia_answer_impl(

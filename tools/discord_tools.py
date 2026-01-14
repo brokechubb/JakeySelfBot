@@ -596,5 +596,329 @@ class DiscordTools:
         except (ValueError, TypeError, ImportError):
             return None
 
+    # Moderation Tools
+    
+    async def kick_user(self, guild_id: str, user_id: str, reason: str = "") -> Dict[str, Any]:
+        """Kick a user from a specific guild"""
+        try:
+            guild = self.bot.get_guild(int(guild_id))
+            if not guild:
+                return {"error": f"Guild with ID {guild_id} not found"}
+
+            try:
+                # Try to get member from cache first
+                member = guild.get_member(int(user_id))
+                if not member:
+                    # Try fetching if not in cache
+                    member = await guild.fetch_member(int(user_id))
+            except discord.NotFound:
+                return {"error": f"User with ID {user_id} not found in guild {guild.name}"}
+            except discord.Forbidden:
+                return {"error": f"Permission denied to access member info in guild {guild.name}"}
+
+            try:
+                await member.kick(reason=reason)
+                return {
+                    "status": "success",
+                    "action": "kick",
+                    "user": f"{member.name}#{member.discriminator}",
+                    "guild": guild.name,
+                    "reason": reason
+                }
+            except discord.Forbidden:
+                return {"error": f"Permission denied: Cannot kick user. Check if you have 'Kick Members' permission and if the user has a higher role."}
+            except discord.HTTPException as e:
+                return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error kicking user: {e}")
+            return {"error": f"Failed to kick user: {str(e)}"}
+
+    async def ban_user(self, guild_id: str, user_id: str, reason: str = "", delete_message_seconds: int = 0) -> Dict[str, Any]:
+        """Ban a user from a specific guild"""
+        try:
+            guild = self.bot.get_guild(int(guild_id))
+            if not guild:
+                return {"error": f"Guild with ID {guild_id} not found"}
+            
+            user = self.bot.get_user(int(user_id))
+            if not user:
+                try:
+                    user = await self.bot.fetch_user(int(user_id))
+                except:
+                    pass
+            
+            if not user:
+                 return {"error": f"User with ID {user_id} not found/could not be fetched."}
+
+            try:
+                # delete_message_days is deprecated in favor of delete_message_seconds in newer versions,
+                # but discord.py-self often aligns with older discord.py (1.7.3). 
+                # To be safe, we try one and fallback? Or just use delete_message_days (0-7).
+                # Common discord.py-self usage is delete_message_days.
+                
+                await guild.ban(user, reason=reason, delete_message_days=min(7, max(0, int(delete_message_seconds / 86400))))
+                
+                return {
+                    "status": "success",
+                    "action": "ban",
+                    "user": f"{user.name}#{user.discriminator}",
+                    "guild": guild.name,
+                    "reason": reason
+                }
+            except discord.Forbidden:
+                return {"error": f"Permission denied: Cannot ban user. Check 'Ban Members' permission and role hierarchy."}
+            except discord.HTTPException as e:
+                return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error banning user: {e}")
+            return {"error": f"Failed to ban user: {str(e)}"}
+
+    async def unban_user(self, guild_id: str, user_id: str, reason: str = "") -> Dict[str, Any]:
+        """Unban a user from a specific guild"""
+        try:
+            guild = self.bot.get_guild(int(guild_id))
+            if not guild:
+                return {"error": f"Guild with ID {guild_id} not found"}
+            
+            user = self.bot.get_user(int(user_id))
+            if not user:
+                try:
+                    user = await self.bot.fetch_user(int(user_id))
+                except:
+                    pass
+            
+            # If we can't find the user object, try to construct a partial one if possible, 
+            # or just rely on ID if the lib supports it. But `unban` usually takes a User object.
+            if not user:
+                # Create a dummy user object with just the ID if possible, but discord.py validation might fail.
+                # Let's return error if we can't fetch.
+                return {"error": f"User with ID {user_id} not found/could not be fetched."}
+
+            try:
+                await guild.unban(user, reason=reason)
+                return {
+                    "status": "success",
+                    "action": "unban",
+                    "user": f"{user.name}#{user.discriminator}",
+                    "guild": guild.name,
+                    "reason": reason
+                }
+            except discord.Forbidden:
+                return {"error": f"Permission denied: Cannot unban user. Check 'Ban Members' permission."}
+            except discord.HTTPException as e:
+                return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error unbanning user: {e}")
+            return {"error": f"Failed to unban user: {str(e)}"}
+
+    async def timeout_user(self, guild_id: str, user_id: str, duration_minutes: int, reason: str = "") -> Dict[str, Any]:
+        """Timeout/mute a user for a specific duration"""
+        try:
+            guild = self.bot.get_guild(int(guild_id))
+            if not guild:
+                return {"error": f"Guild with ID {guild_id} not found"}
+
+            try:
+                member = guild.get_member(int(user_id))
+                if not member:
+                    member = await guild.fetch_member(int(user_id))
+            except discord.NotFound:
+                return {"error": f"User with ID {user_id} not found in guild {guild.name}"}
+
+            try:
+                import datetime
+                # Calculate timeout until
+                if duration_minutes > 0:
+                    until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=duration_minutes)
+                else:
+                    until = None # Remove timeout
+
+                # discord.py-self check for timeout support
+                if hasattr(member, 'timeout'):
+                    await member.timeout(until, reason=reason)
+                elif hasattr(member, 'edit'):
+                    # Some versions use edit(timed_out_until=...)
+                    await member.edit(timed_out_until=until, reason=reason)
+                else:
+                    return {"error": "Timeout not supported by this library version or member object"}
+
+                return {
+                    "status": "success",
+                    "action": "timeout",
+                    "user": f"{member.name}#{member.discriminator}",
+                    "guild": guild.name,
+                    "duration_minutes": duration_minutes,
+                    "reason": reason
+                }
+            except discord.Forbidden:
+                return {"error": f"Permission denied: Cannot timeout user. Check permissions and role hierarchy."}
+            except discord.HTTPException as e:
+                return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error timing out user: {e}")
+            return {"error": f"Failed to timeout user: {str(e)}"}
+            
+    async def purge_messages(self, channel_id: str, limit: int = 10, user_id: str = None) -> Dict[str, Any]:
+        """Purge/delete messages from a channel"""
+        try:
+            # Parse channel ID
+            channel_id_clean = self._parse_channel_id(channel_id)
+            if not channel_id_clean:
+                 return {"error": "Invalid channel ID"}
+            
+            channel = self.bot.get_channel(channel_id_clean)
+            if not channel:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id_clean)
+                except:
+                    return {"error": "Channel not found"}
+
+            if not isinstance(channel, discord.TextChannel):
+                 return {"error": "Can only purge messages in text channels"}
+            
+            # Limit safety
+            limit = min(max(1, limit), 100) # Max 100 at a time for safety
+            
+            def check(m):
+                if user_id:
+                    return str(m.author.id) == str(user_id)
+                return True
+
+            try:
+                deleted = await channel.purge(limit=limit, check=check)
+                return {
+                    "status": "success",
+                    "action": "purge",
+                    "channel": channel.name,
+                    "deleted_count": len(deleted)
+                }
+            except discord.Forbidden:
+                return {"error": "Permission denied: Cannot manage messages in this channel."}
+            except discord.HTTPException as e:
+                return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+            logger.error(f"Error purging messages: {e}")
+            return {"error": f"Failed to purge messages: {str(e)}"}
+
+    async def pin_message(self, channel_id: str, message_id: str) -> Dict[str, Any]:
+        """Pin a message in a channel"""
+        try:
+             # Parse channel ID
+            channel_id_clean = self._parse_channel_id(channel_id)
+            if not channel_id_clean:
+                 return {"error": "Invalid channel ID"}
+            
+            channel = self.bot.get_channel(channel_id_clean)
+            if not channel:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id_clean)
+                except:
+                    return {"error": "Channel not found"}
+            
+            # Ensure channel supports messages
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                 return {"error": f"Cannot pin messages in channel type {type(channel).__name__}"}
+
+            try:
+                message = await channel.fetch_message(int(message_id))
+            except discord.NotFound:
+                return {"error": "Message not found"}
+                
+            try:
+                await message.pin()
+                return {
+                    "status": "success",
+                    "action": "pin",
+                    "channel": getattr(channel, "name", str(channel.id)),
+                    "message_id": message_id
+                }
+            except discord.Forbidden:
+                return {"error": "Permission denied: Cannot pin messages."}
+            except discord.HTTPException as e:
+                 return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+             logger.error(f"Error pinning message: {e}")
+             return {"error": f"Failed to pin message: {str(e)}"}
+
+    async def unpin_message(self, channel_id: str, message_id: str) -> Dict[str, Any]:
+        """Unpin a message in a channel"""
+        try:
+             # Parse channel ID
+            channel_id_clean = self._parse_channel_id(channel_id)
+            if not channel_id_clean:
+                 return {"error": "Invalid channel ID"}
+            
+            channel = self.bot.get_channel(channel_id_clean)
+            if not channel:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id_clean)
+                except:
+                    return {"error": "Channel not found"}
+            
+            # Ensure channel supports messages
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                 return {"error": f"Cannot unpin messages in channel type {type(channel).__name__}"}
+
+            try:
+                message = await channel.fetch_message(int(message_id))
+            except discord.NotFound:
+                return {"error": "Message not found"}
+                
+            try:
+                await message.unpin()
+                return {
+                    "status": "success",
+                    "action": "unpin",
+                    "channel": getattr(channel, "name", str(channel.id)),
+                    "message_id": message_id
+                }
+            except discord.Forbidden:
+                return {"error": "Permission denied: Cannot unpin messages."}
+            except discord.HTTPException as e:
+                 return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+             logger.error(f"Error unpinning message: {e}")
+             return {"error": f"Failed to unpin message: {str(e)}"}
+
+    async def delete_message(self, channel_id: str, message_id: str) -> Dict[str, Any]:
+        """Delete a single message from a channel"""
+        try:
+            # Parse channel ID
+            channel_id_clean = self._parse_channel_id(channel_id)
+            if not channel_id_clean:
+                 return {"error": "Invalid channel ID"}
+            
+            channel = self.bot.get_channel(channel_id_clean)
+            if not channel:
+                try:
+                    channel = await self.bot.fetch_channel(channel_id_clean)
+                except:
+                    return {"error": "Channel not found"}
+            
+            # Ensure channel supports messages
+            if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.DMChannel)):
+                 return {"error": f"Cannot delete messages in channel type {type(channel).__name__}"}
+
+            try:
+                message = await channel.fetch_message(int(message_id))
+            except discord.NotFound:
+                return {"error": "Message not found"}
+                
+            try:
+                await message.delete()
+                return {
+                    "status": "success",
+                    "action": "delete",
+                    "channel": getattr(channel, "name", "DM" if isinstance(channel, discord.DMChannel) else str(channel.id)),
+                    "message_id": message_id
+                }
+            except discord.Forbidden:
+                return {"error": "Permission denied: Cannot delete message."}
+            except discord.HTTPException as e:
+                 return {"error": f"Discord API error: {str(e)}"}
+        except Exception as e:
+             logger.error(f"Error deleting message: {e}")
+             return {"error": f"Failed to delete message: {str(e)}"}
+
 # Global Discord tools instance (will be initialized with bot client)
 discord_tools = None

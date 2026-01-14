@@ -29,9 +29,13 @@ class DatabaseManager:
         )
         self.init_database()
 
+    def _get_connection(self):
+        """Get a thread-safe database connection"""
+        return sqlite3.connect(self.db_path, check_same_thread=False)
+
     def init_database(self):
         """Initialize the database with required tables"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Create users table
@@ -220,7 +224,7 @@ class DatabaseManager:
                 return cached_data
 
         # Fetch from database with parameterized query
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id.strip(),))
@@ -251,7 +255,7 @@ class DatabaseManager:
         important_facts: Optional[Dict[str, Any]] = None,
     ):
         """Create or update user data with cache invalidation"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -281,7 +285,7 @@ class DatabaseManager:
         channel_id: Optional[str] = None,
     ):
         """Add a conversation entry for a user in a specific channel"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -301,7 +305,7 @@ class DatabaseManager:
 
         if limit is None:
             limit = CONVERSATION_HISTORY_LIMIT
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -327,7 +331,7 @@ class DatabaseManager:
 
         if limit is None:
             limit = CONVERSATION_HISTORY_LIMIT
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -353,7 +357,7 @@ class DatabaseManager:
 
         if limit is None:
             limit = CONVERSATION_HISTORY_LIMIT
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -373,7 +377,7 @@ class DatabaseManager:
 
     def add_memory(self, user_id: str, key: str, value: str):
         """Add a memory entry for a user"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -389,7 +393,7 @@ class DatabaseManager:
 
     def get_memories(self, user_id: str) -> Dict[str, str]:
         """Get all memories for a user"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute("SELECT key, value FROM memories WHERE user_id = ?", (user_id,))
@@ -400,7 +404,7 @@ class DatabaseManager:
 
     def get_memory(self, user_id: str, key: str) -> Optional[str]:
         """Get a specific memory for a user"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -413,7 +417,7 @@ class DatabaseManager:
 
     def delete_memories(self, user_id: str) -> int:
         """Delete all memories for a user and return the count of deleted memories"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Count memories before deletion
@@ -431,7 +435,7 @@ class DatabaseManager:
     def delete_old_memories(self, user_id: str, cutoff_date: str) -> int:
         """Delete memories for a user older than a cutoff date and return the count of deleted memories.
         If user_id is empty, deletes old memories for all users."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Count memories before deletion
@@ -466,7 +470,7 @@ class DatabaseManager:
 
     def clear_user_history(self, user_id: str):
         """Clear conversation history for a user"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Delete all conversations for this user
@@ -484,7 +488,7 @@ class DatabaseManager:
 
     def clear_channel_history(self, channel_id: str):
         """Clear conversation history for a channel"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Delete all conversations for this channel
@@ -495,7 +499,7 @@ class DatabaseManager:
 
     def clear_user_channel_history(self, user_id: str, channel_id: str):
         """Clear conversation history for a user in a specific channel"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Delete all conversations for this user in this channel
@@ -509,7 +513,7 @@ class DatabaseManager:
 
     def clear_all_history(self):
         """Clear all conversation history (admin/debug function)"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Delete all conversations
@@ -543,7 +547,7 @@ class DatabaseManager:
     # Async database operations
     async def aget_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Async version of get_user"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_user, user_id)
 
     async def acreate_or_update_user(
@@ -554,7 +558,7 @@ class DatabaseManager:
         important_facts: Optional[Dict[str, Any]] = None,
     ):
         """Async version of create_or_update_user"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor,
             self.create_or_update_user,
@@ -571,7 +575,7 @@ class DatabaseManager:
         channel_id: Optional[str] = None,
     ):
         """Async version of add_conversation"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.add_conversation, user_id, message_history, channel_id
         )
@@ -580,7 +584,7 @@ class DatabaseManager:
         self, user_id: str, limit: int = None
     ) -> List[Dict]:
         """Async version of get_recent_conversations"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_recent_conversations, user_id, limit
         )
@@ -589,7 +593,7 @@ class DatabaseManager:
         self, channel_id: str, limit: int = None
     ) -> List[Dict]:
         """Async version of get_recent_channel_conversations"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_recent_channel_conversations, channel_id, limit
         )
@@ -598,7 +602,7 @@ class DatabaseManager:
         self, user_id: str, channel_id: str, limit: int = None
     ) -> List[Dict]:
         """Async version of get_recent_user_channel_conversations"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor,
             self.get_recent_user_channel_conversations,
@@ -609,43 +613,43 @@ class DatabaseManager:
 
     async def aadd_memory(self, user_id: str, key: str, value: str):
         """Async version of add_memory"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.add_memory, user_id, key, value
         )
 
     async def aget_memories(self, user_id: str) -> Dict[str, str]:
         """Async version of get_memories"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_memories, user_id)
 
     async def aget_memory(self, user_id: str, key: str) -> Optional[str]:
         """Async version of get_memory"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_memory, user_id, key)
 
     async def adelete_memories(self, user_id: str) -> int:
         """Async version of delete_memories"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.delete_memories, user_id)
 
     async def adelete_old_memories(self, user_id: str, cutoff_date: str) -> int:
         """Async version of delete_old_memories"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.delete_old_memories, user_id, cutoff_date
         )
 
     async def aclear_channel_history(self, channel_id: str):
         """Async version of clear_channel_history"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.clear_channel_history, channel_id
         )
 
     async def aclear_user_channel_history(self, user_id: str, channel_id: str):
         """Async version of clear_user_channel_history"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.clear_user_channel_history, user_id, channel_id
         )
@@ -653,7 +657,7 @@ class DatabaseManager:
     # tip.cc balance management methods
     def update_balance(self, currency: str, amount: float, usd_value: float):
         """Update or insert a cryptocurrency balance"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -669,7 +673,7 @@ class DatabaseManager:
 
     def get_balance(self, currency: str) -> Optional[Dict[str, Any]]:
         """Get balance for a specific currency"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -695,7 +699,7 @@ class DatabaseManager:
 
     def get_all_balances(self) -> List[Dict[str, Any]]:
         """Get all cryptocurrency balances"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute("""
@@ -720,7 +724,7 @@ class DatabaseManager:
     def clear_balances(self) -> bool:
         """Clear all cryptocurrency balances from database"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM tipcc_balances")
             conn.commit()
@@ -733,7 +737,7 @@ class DatabaseManager:
     def clear_tipcc_transactions(self) -> bool:
         """Clear all tip.cc transactions from database"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM tipcc_transactions")
             conn.commit()
@@ -745,7 +749,7 @@ class DatabaseManager:
 
     def get_total_usd_balance(self) -> float:
         """Get total USD value of all balances"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute("SELECT SUM(usd_value) FROM tipcc_balances")
@@ -765,7 +769,7 @@ class DatabaseManager:
         sender: Optional[str] = None,
     ):
         """Add a tip.cc transaction record"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -789,7 +793,7 @@ class DatabaseManager:
 
     def get_recent_transactions(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent tip.cc transactions"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -821,7 +825,7 @@ class DatabaseManager:
 
     def get_transaction_stats(self) -> Dict[str, Any]:
         """Get transaction statistics"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         # Get total received from airdrops
@@ -865,34 +869,34 @@ class DatabaseManager:
     # Async versions of tip.cc methods
     async def aupdate_balance(self, currency: str, amount: float, usd_value: float):
         """Async version of update_balance"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.update_balance, currency, amount, usd_value
         )
 
     async def aget_balance(self, currency: str) -> Optional[Dict[str, Any]]:
         """Async version of get_balance"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_balance, currency)
 
     async def aget_all_balances(self) -> List[Dict[str, Any]]:
         """Async version of get_all_balances"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_all_balances)
 
     async def aclear_balances(self) -> bool:
         """Async version of clear_balances"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.clear_balances)
 
     async def aclear_tipcc_transactions(self) -> bool:
         """Async version of clear_tipcc_transactions"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.clear_tipcc_transactions)
 
     async def aget_total_usd_balance(self) -> float:
         """Async version of get_total_usd_balance"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_total_usd_balance)
 
     async def aadd_transaction(
@@ -906,7 +910,7 @@ class DatabaseManager:
         sender: Optional[str] = None,
     ):
         """Async version of add_transaction"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor,
             self.add_transaction,
@@ -921,14 +925,14 @@ class DatabaseManager:
 
     async def aget_recent_transactions(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Async version of get_recent_transactions"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_recent_transactions, limit
         )
 
     async def aget_transaction_stats(self) -> Dict[str, Any]:
         """Async version of get_transaction_stats"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_transaction_stats)
 
     def close(self):
@@ -947,7 +951,7 @@ class DatabaseManager:
         recurring_pattern: str = None,
     ):
         """Add a new reminder"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -972,7 +976,7 @@ class DatabaseManager:
 
     def get_reminder(self, reminder_id: int) -> Optional[Dict[str, Any]]:
         """Get a specific reminder by ID"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1004,7 +1008,7 @@ class DatabaseManager:
         self, user_id: str, status: str = "pending"
     ) -> List[Dict[str, Any]]:
         """Get all reminders for a user with a specific status (default: pending)"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1037,7 +1041,7 @@ class DatabaseManager:
 
     def get_due_reminders(self) -> List[Dict[str, Any]]:
         """Get all reminders that are due (current time >= trigger_time and status = pending)"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1069,7 +1073,7 @@ class DatabaseManager:
 
     def update_reminder_status(self, reminder_id: int, status: str):
         """Update the status of a reminder (pending, triggered, cancelled, etc.)"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1086,7 +1090,7 @@ class DatabaseManager:
 
     def cancel_reminder(self, reminder_id: int, user_id: str = None) -> bool:
         """Cancel a reminder by updating its status to 'cancelled'"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         if user_id:
@@ -1121,7 +1125,7 @@ class DatabaseManager:
         self, message_id: str, channel_id: str, emoji: str, role_id: str, guild_id: str
     ):
         """Add a reaction role mapping to the database"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1137,7 +1141,7 @@ class DatabaseManager:
 
     def remove_reaction_role(self, message_id: str, emoji: str):
         """Remove a reaction role mapping from the database"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1152,7 +1156,7 @@ class DatabaseManager:
 
     def get_reaction_roles_for_message(self, message_id: str):
         """Get all reaction roles for a specific message"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1168,7 +1172,7 @@ class DatabaseManager:
 
     def get_reaction_role(self, message_id: str, emoji: str):
         """Get a specific reaction role for a message and emoji"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1184,7 +1188,7 @@ class DatabaseManager:
 
     def get_all_reaction_roles(self, guild_id: str):
         """Get all reaction roles for a guild"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         cursor.execute(
@@ -1218,7 +1222,7 @@ class DatabaseManager:
         recurring_pattern: str = None,
     ):
         """Async version of add_reminder"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor,
             self.add_reminder,
@@ -1236,7 +1240,7 @@ class DatabaseManager:
         self, message_id: str, channel_id: str, emoji: str, role_id: str, guild_id: str
     ):
         """Async version of add_reaction_role"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor,
             self.add_reaction_role,
@@ -1249,35 +1253,35 @@ class DatabaseManager:
 
     async def aremove_reaction_role(self, message_id: str, emoji: str):
         """Async version of remove_reaction_role"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.remove_reaction_role, message_id, emoji
         )
 
     async def aget_reaction_roles_for_message(self, message_id: str):
         """Async version of get_reaction_roles_for_message"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_reaction_roles_for_message, message_id
         )
 
     async def aget_reaction_role(self, message_id: str, emoji: str):
         """Async version of get_reaction_role"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_reaction_role, message_id, emoji
         )
 
     async def aget_all_reaction_roles(self, guild_id: str):
         """Async version of get_all_reaction_roles"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_all_reaction_roles, guild_id
         )
 
     async def aget_reminder(self, reminder_id: int) -> Optional[Dict[str, Any]]:
         """Async version of get_reminder"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_reminder, reminder_id
         )
@@ -1286,26 +1290,26 @@ class DatabaseManager:
         self, user_id: str, status: str = "pending"
     ) -> List[Dict[str, Any]]:
         """Async version of get_user_reminders"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.get_user_reminders, user_id, status
         )
 
     async def aget_due_reminders(self) -> List[Dict[str, Any]]:
         """Async version of get_due_reminders"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_due_reminders)
 
     async def aupdate_reminder_status(self, reminder_id: int, status: str):
         """Async version of update_reminder_status"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.update_reminder_status, reminder_id, status
         )
 
     async def acancel_reminder(self, reminder_id: int, user_id: str = None) -> bool:
         """Async version of cancel_reminder"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.cancel_reminder, reminder_id, user_id
         )
@@ -1313,7 +1317,7 @@ class DatabaseManager:
     # Keyword management methods
     def add_keyword(self, keyword: str) -> bool:
         """Add a new trigger keyword"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
@@ -1334,7 +1338,7 @@ class DatabaseManager:
 
     def remove_keyword(self, keyword: str) -> bool:
         """Remove a trigger keyword"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
@@ -1352,7 +1356,7 @@ class DatabaseManager:
 
     def get_keywords(self) -> List[str]:
         """Get all enabled keywords"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
@@ -1369,7 +1373,7 @@ class DatabaseManager:
 
     def enable_keyword(self, keyword: str) -> bool:
         """Enable a keyword"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
@@ -1390,7 +1394,7 @@ class DatabaseManager:
 
     def disable_keyword(self, keyword: str) -> bool:
         """Disable a keyword"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
@@ -1432,32 +1436,32 @@ class DatabaseManager:
     # Async versions of keyword methods
     async def aadd_keyword(self, keyword: str) -> bool:
         """Async version of add_keyword"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.add_keyword, keyword)
 
     async def aremove_keyword(self, keyword: str) -> bool:
         """Async version of remove_keyword"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.remove_keyword, keyword)
 
     async def aget_keywords(self) -> List[str]:
         """Async version of get_keywords"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.get_keywords)
 
     async def aenable_keyword(self, keyword: str) -> bool:
         """Async version of enable_keyword"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.enable_keyword, keyword)
 
     async def adisable_keyword(self, keyword: str) -> bool:
         """Async version of disable_keyword"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.disable_keyword, keyword)
 
     async def acheck_message_for_keywords(self, message_content: str) -> bool:
         """Async version of check_message_for_keywords"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, self.check_message_for_keywords, message_content
         )

@@ -37,6 +37,7 @@ Comprehensive documentation for Jakey, the Discord self-bot with AI capabilities
 - [WELCOME_MESSAGES.md](WELCOME_MESSAGES.md) - AI welcome messages
 - [TIP_THANK_YOU_FEATURE.md](TIP_THANK_YOU_FEATURE.md) - Auto thank you messages
 - [TIME_DATE_FEATURES.md](TIME_DATE_FEATURES.md) - Time and date commands
+- [MODERATION_TOOLS.md](MODERATION_TOOLS.md) - AI-powered moderation tools
 
 ## Quick Reference
 

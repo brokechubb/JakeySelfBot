@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
 Test script to verify AI performance improvements
+
+NOTE: Pollinations API has been deprecated. 
+This test now focuses on OpenRouter via AI Provider Manager.
 """
 import asyncio
 import time
@@ -10,32 +13,32 @@ import os
 # Add the current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ai.pollinations import pollinations_api
 from ai.ai_provider_manager import ai_provider_manager
+from ai.openrouter import openrouter_api
 
 
 async def test_ai_performance():
-    """Test both direct API calls and AI provider manager"""
+    """Test AI provider manager performance"""
     
-    print("🧪 Testing AI Performance Improvements")
+    print("🧪 Testing AI Performance")
     print("=" * 50)
     
     # Test message
     messages = [{'role': 'user', 'content': 'Say hello quickly'}]
     
-    # Test 1: Direct Pollinations API
-    print("\n1️⃣ Testing Direct Pollinations API...")
+    # Test 1: Direct OpenRouter API
+    print("\n1️⃣ Testing Direct OpenRouter API...")
     start = time.time()
-    result = pollinations_api.generate_text(messages=messages, max_tokens=50)
-    pollinations_time = time.time() - start
+    result = openrouter_api.generate_text(messages=messages, max_tokens=50)
+    openrouter_time = time.time() - start
     
     if 'choices' in result and result['choices']:
         content = result['choices'][0]['message']['content']
-        print(f"✅ Pollinations: {pollinations_time:.2f}s")
+        print(f"✅ OpenRouter: {openrouter_time:.2f}s")
         print(f"📝 Response: {content[:100]}...")
     else:
         print(f"❌ Error: {result.get('error', 'Unknown error')}")
-        print(f"⏱️ Time: {pollinations_time:.2f}s")
+        print(f"⏱️ Time: {openrouter_time:.2f}s")
     
     # Test 2: AI Provider Manager (with failover)
     print("\n2️⃣ Testing AI Provider Manager...")
@@ -60,33 +63,33 @@ async def test_ai_performance():
     print(f"📈 Success rate: {stats['success_rate']:.1%}")
     print(f"🏥 Provider usage: {stats['provider_usage']}")
     
-    # Test 4: Timeout statistics
-    print("\n4️⃣ Timeout Statistics:")
-    timeout_stats = stats.get('timeout_stats', {})
-    if timeout_stats.get('monitoring_enabled'):
-        pollinations_stats = timeout_stats.get('pollinations', {})
-        print(f"⏱️ Pollinations avg response: {pollinations_stats.get('avg_response_time', 0):.2f}s")
-        print(f"🔥 Pollinations timeout rate: {pollinations_stats.get('timeout_rate_percent', 0):.1f}%")
-    else:
-        print("📊 Timeout monitoring disabled")
+    # Test 4: OpenRouter Rate Limit Status
+    print("\n4️⃣ Rate Limit Status:")
+    rate_status = openrouter_api.check_rate_limits()
+    print(f"📊 Can make request: {rate_status['can_request']}")
+    print(f"📊 Requests per minute: {rate_status['requests_per_min']}/{rate_status['rate_limit_per_min']}")
+    if rate_status.get('limits'):
+        limits = rate_status['limits']
+        print(f"📊 Free requests remaining: {limits.get('free_requests_remaining', 'N/A')}")
     
     print("\n" + "=" * 50)
     print("🎯 Performance Summary:")
     
-    if pollinations_time < 5:
-        print(f"✅ Pollinations API is fast ({pollinations_time:.2f}s)")
+    if openrouter_time < 5:
+        print(f"✅ OpenRouter API is fast ({openrouter_time:.2f}s)")
     else:
-        print(f"⚠️ Pollinations API is slow ({pollinations_time:.2f}s)")
+        print(f"⚠️ OpenRouter API is slow ({openrouter_time:.2f}s)")
     
     if manager_time < 10:
         print(f"✅ AI Manager is fast ({manager_time:.2f}s)")
     else:
         print(f"⚠️ AI Manager is slow ({manager_time:.2f}s)")
     
-    if manager_time - pollinations_time < 2:
-        print("✅ Low overhead from AI Manager")
+    overhead = manager_time - openrouter_time
+    if overhead < 2:
+        print(f"✅ Low overhead from AI Manager ({overhead:.2f}s)")
     else:
-        print(f"⚠️ High overhead from AI Manager: {manager_time - pollinations_time:.2f}s")
+        print(f"⚠️ High overhead from AI Manager: {overhead:.2f}s")
 
 
 if __name__ == "__main__":

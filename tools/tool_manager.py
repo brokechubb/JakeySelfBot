@@ -32,6 +32,12 @@ except ImportError:
 
 class ToolManager:
     def __init__(self):
+        # Create a session for connection pooling (reuses TCP connections)
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        
         self.tools = {
             "set_reminder": self.set_reminder,
             "list_reminders": self.list_reminders,
@@ -63,6 +69,16 @@ class ToolManager:
             "discord_send_message": self.discord_send_message,
             "discord_send_dm": self.discord_send_dm,
             "discord_get_user_roles": self.discord_get_user_roles,
+            # Discord Moderation Tools
+            "discord_kick_user": self.discord_kick_user,
+            "discord_ban_user": self.discord_ban_user,
+            "discord_unban_user": self.discord_unban_user,
+            "discord_timeout_user": self.discord_timeout_user,
+            "discord_remove_timeout": self.discord_remove_timeout,
+            "discord_purge_messages": self.discord_purge_messages,
+            "discord_pin_message": self.discord_pin_message,
+            "discord_unpin_message": self.discord_unpin_message,
+            "discord_delete_message": self.discord_delete_message,
             # Rate limiting tools
             "get_user_rate_limit_status": self.get_user_rate_limit_status,
             "get_system_rate_limit_stats": self.get_system_rate_limit_stats,
@@ -147,6 +163,16 @@ class ToolManager:
             "discord_list_guild_members": 1.0,
             "discord_send_message": 1.0,
             "discord_send_dm": 1.0,
+            # Discord Moderation rate limits
+            "discord_kick_user": 2.0,
+            "discord_ban_user": 2.0,
+            "discord_unban_user": 2.0,
+            "discord_timeout_user": 2.0,
+            "discord_remove_timeout": 2.0,
+            "discord_purge_messages": 5.0, # Higher rate limit for bulk delete
+            "discord_pin_message": 2.0,
+            "discord_unpin_message": 2.0,
+            "discord_delete_message": 2.0,
         }
 
     def _validate_crypto_symbol(self, symbol: str) -> bool:
@@ -682,7 +708,7 @@ class ToolManager:
                         "properties": {
                             "channel_id": {
                                 "type": "string",
-                                "description": "The Discord channel ID to read messages from",
+                                "description": "The Discord channel ID to read messages from. Use 'current' to read from the channel where the user sent the message.",
                             },
                             "limit": {
                                 "type": "number",
@@ -703,7 +729,7 @@ class ToolManager:
                         "properties": {
                             "channel_id": {
                                 "type": "string",
-                                "description": "The Discord channel ID to search messages in",
+                                "description": "The Discord channel ID to search messages in. Use 'current' for the channel where the user sent the message.",
                             },
                             "query": {
                                 "type": "string",
@@ -774,7 +800,7 @@ class ToolManager:
                         "properties": {
                             "channel_id": {
                                 "type": "string",
-                                "description": "The Discord channel ID to send the message to",
+                                "description": "The Discord channel ID to send the message to. Use 'current' for the channel where the user sent the message.",
                             },
                             "content": {
                                 "type": "string",
@@ -807,6 +833,229 @@ class ToolManager:
                             },
                         },
                         "required": ["user_id", "content"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_kick_user",
+                    "description": "Kick a user from a specific Discord guild",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "guild_id": {
+                                "type": "string",
+                                "description": "The Discord guild ID where the user is",
+                            },
+                            "user_id": {
+                                "type": "string",
+                                "description": "The Discord user ID to kick",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Reason for kicking the user",
+                            },
+                        },
+                        "required": ["guild_id", "user_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_ban_user",
+                    "description": "Ban a user from a specific Discord guild",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "guild_id": {
+                                "type": "string",
+                                "description": "The Discord guild ID where to ban the user",
+                            },
+                            "user_id": {
+                                "type": "string",
+                                "description": "The Discord user ID to ban",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Reason for banning the user",
+                            },
+                            "delete_message_seconds": {
+                                "type": "integer",
+                                "description": "Number of seconds to delete messages for (0-604800)",
+                                "default": 0
+                            }
+                        },
+                        "required": ["guild_id", "user_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_unban_user",
+                    "description": "Unban a user from a specific Discord guild",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "guild_id": {
+                                "type": "string",
+                                "description": "The Discord guild ID where to unban the user",
+                            },
+                            "user_id": {
+                                "type": "string",
+                                "description": "The Discord user ID to unban",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Reason for unbanning the user",
+                            },
+                        },
+                        "required": ["guild_id", "user_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_timeout_user",
+                    "description": "Timeout/mute a user for a specific duration",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "guild_id": {
+                                "type": "string",
+                                "description": "The Discord guild ID where the user is",
+                            },
+                            "user_id": {
+                                "type": "string",
+                                "description": "The Discord user ID to timeout",
+                            },
+                            "duration_minutes": {
+                                "type": "integer",
+                                "description": "Duration of timeout in minutes (0 to remove timeout)",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Reason for the timeout",
+                            },
+                        },
+                        "required": ["guild_id", "user_id", "duration_minutes"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_remove_timeout",
+                    "description": "Remove timeout from a user",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "guild_id": {
+                                "type": "string",
+                                "description": "The Discord guild ID where the user is",
+                            },
+                            "user_id": {
+                                "type": "string",
+                                "description": "The Discord user ID to remove timeout from",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Reason for removing the timeout",
+                            },
+                        },
+                        "required": ["guild_id", "user_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_purge_messages",
+                    "description": "Purge/delete multiple messages from a channel",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "channel_id": {
+                                "type": "string",
+                                "description": "The Discord channel ID to purge messages from",
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Number of messages to delete (max 100)",
+                                "default": 10
+                            },
+                            "user_id": {
+                                "type": "string",
+                                "description": "Optional: Only delete messages from this user",
+                            },
+                        },
+                        "required": ["channel_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_pin_message",
+                    "description": "Pin a specific message in a channel",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "channel_id": {
+                                "type": "string",
+                                "description": "The Discord channel ID",
+                            },
+                            "message_id": {
+                                "type": "string",
+                                "description": "The ID of the message to pin",
+                            },
+                        },
+                        "required": ["channel_id", "message_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_unpin_message",
+                    "description": "Unpin a specific message in a channel",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "channel_id": {
+                                "type": "string",
+                                "description": "The Discord channel ID",
+                            },
+                            "message_id": {
+                                "type": "string",
+                                "description": "The ID of the message to unpin",
+                            },
+                        },
+                        "required": ["channel_id", "message_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discord_delete_message",
+                    "description": "Delete a single user message from a channel",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "channel_id": {
+                                "type": "string",
+                                "description": "The Discord channel ID where the message is",
+                            },
+                            "message_id": {
+                                "type": "string",
+                                "description": "The ID of the message to delete",
+                            },
+                        },
+                        "required": ["channel_id", "message_id"],
                     },
                 },
             },
@@ -1134,7 +1383,7 @@ class ToolManager:
                 "X-CMC_PRO_API_KEY": COINMARKETCAP_API_KEY,
             }
 
-            response = requests.get(url, headers=headers, params=parameters, timeout=10)
+            response = self.session.get(url, headers=headers, params=parameters, timeout=10)
             response.raise_for_status()
             data = response.json()
 
@@ -1249,106 +1498,8 @@ class ToolManager:
         else:
             return f"No schedule found for {site} {frequency} bonus"
 
-    def _web_search_html_fallback(self, query: str, instances: List[str]) -> str:
-        """Fallback method to parse HTML results from SearXNG when JSON is not available"""
-        try:
-            import re
-
-            from bs4 import BeautifulSoup
-
-            # Try each instance for HTML parsing
-            for instance in instances:
-                try:
-                    # Use public SearXNG instance for search (HTML format)
-                    search_url = urljoin(instance, "search")
-
-                    # Prepare search parameters for SearXNG (HTML format)
-                    params = {
-                        "q": query,
-                        "categories": "general",
-                        "engines": "google,bing,duckduckgo,brave",
-                        "language": "en-US",
-                    }
-
-                    response = requests.get(search_url, params=params, timeout=15)
-
-                    # Check if we got a successful response
-                    if response.status_code == 200:
-                        # Parse HTML content
-                        soup = BeautifulSoup(response.content, "html.parser")
-
-                        # Extract results from search result articles (new SearXNG) or divs (old SearXNG)
-                        result_divs = soup.find_all("article", class_="result")
-                        if not result_divs:
-                            # Fallback to div elements for older SearXNG versions
-                            result_divs = soup.find_all("div", class_="result")
-                        if not result_divs:
-                            # Try alternative class names
-                            result_divs = soup.find_all(
-                                "div", {"class": lambda x: x and "result" in x}
-                            )
-
-                        if result_divs:
-                            results = []
-                            for result_div in result_divs[:7]:  # Limit to top 7 results
-                                try:
-                                    # Extract title (updated for article structure)
-                                    title_elem = result_div.find(
-                                        "h3"
-                                    ) or result_div.find("h4")
-                                    if title_elem:
-                                        title_link = title_elem.find("a")
-                                        title = (
-                                            title_link.get_text(strip=True)
-                                            if title_link
-                                            else title_elem.get_text(strip=True)
-                                        )
-                                    else:
-                                        title = "No title"
-
-                                    # Extract URL
-                                    url_elem = result_div.find("a", href=True)
-                                    url = url_elem["href"] if url_elem else ""
-
-                                    # Extract content/description (updated for article structure)
-                                    content_elem = result_div.find(
-                                        "p", class_="content"
-                                    )
-                                    if not content_elem:
-                                        content_elem = result_div.find("p")
-                                    content = (
-                                        content_elem.get_text(strip=True)
-                                        if content_elem
-                                        else ""
-                                    )
-
-                                    # Limit content length
-                                    if len(content) > 300:
-                                        content = content[:300] + "..."
-
-                                    if title and content:
-                                        results.append(f"• {title}: {content} ({url})")
-                                except:
-                                    # Skip malformed results
-                                    continue
-
-                            if results:
-                                return "\n".join(results)
-                            # Continue to next instance if no valid results
-                        # Continue to next instance if no results found
-                    # Continue to next instance if HTTP error
-                except:
-                    # Continue to next instance if any error
-                    continue
-
-            # If all instances failed
-            return f"No search results found for '{query}' after trying multiple public SearXNG instances."
-
-        except Exception as e:
-            return f"Error during HTML parsing fallback: {str(e)}"
-
     def web_search(self, query: str) -> str:
-        """Perform real-time web searches using public SearXNG instances with fallback mechanism"""
+        """Perform real-time web searches using local SearXNG instance with AI guidance"""
         if not self._check_rate_limit("web_search"):
             return "Rate limit exceeded. Please wait before making another search."
 
@@ -1356,190 +1507,121 @@ class ToolManager:
         if not self._validate_search_query(query):
             return "Invalid search query. Please check your input and try again."
 
-        # List of SearXNG instances (local first, then public fallback)
-        # Reduced list to speed up failover
-        public_instances = [
-            "http://localhost:8086",  # Local SearXNG instance (fastest if available)
-            "https://searx.be",
-            "https://metacat.online",
-        ]
+        # Use only localhost SearXNG instance for efficiency
+        instance = "http://localhost:8086"
 
-        # Shuffle the instances for better distribution (keep local first for speed)
-        local_first = public_instances[:1]
-        others = public_instances[1:]
-        random.shuffle(others)
-        public_instances = local_first + others
+        try:
+            logger.debug(f"web_search query: {query}")
+            search_url = urljoin(instance, "search")
 
-        # Set overall timeout to prevent hanging
-        import time
-        start_time = time.time()
-        max_total_time = 20  # Maximum 20 seconds total for web search
+            # Prepare search parameters for SearXNG
+            params = {
+                "q": query,
+                "format": "json",
+                "categories": "general",
+                "engines": "google,bing,duckduckgo,brave",
+                "language": "en-US",
+            }
 
-        logger.info(f"web_search trying instances: {public_instances}")
+            response = self.session.get(search_url, params=params, timeout=10)
 
-        # Try each instance until one works
-        for instance in public_instances:
-            # Check if we've exceeded max total time
-            if time.time() - start_time > max_total_time:
-                logger.warning(f"web_search exceeded max time, stopping")
-                break
+            # Check if we got a successful response
+            if response.status_code == 200:
+                try:
+                    data = response.json()
 
-            try:
-                logger.info(f"web_search trying: {instance}")
-                # Use public SearXNG instance for search
-                search_url = urljoin(instance, "search")
+                    # Parse and format results
+                    if "results" in data and data["results"]:
+                        results = []
+                        for result in data["results"][:7]:  # Limit to top 7 results
+                            title = result.get("title", "No title")
+                            content = result.get("content", "")
+                            if len(content) > 300:
+                                content = content[:300] + "..."
+                            # Don't include URLs - AI guidance says not to cite them
+                            results.append(f"• {title}: {content}")
 
-                # Prepare search parameters for SearXNG
-                params = {
-                    "q": query,
-                    "format": "json",
-                    "categories": "general",
-                    "engines": "google,bing,duckduckgo,brave",
-                    "language": "en-US",
-                }
+                        logger.info(f"web_search success: {len(data['results'])} results for '{query[:50]}'")
+                        return "\n".join(results)
+                    else:
+                        logger.info(f"web_search no results for: {query}")
+                        return f"No search results found for '{query}'."
+                except ValueError:
+                    logger.warning(f"web_search JSON decode failed")
+                    return f"Error parsing search results for '{query}'."
+            else:
+                logger.warning(f"web_search HTTP {response.status_code}")
+                return f"Search service returned error {response.status_code}. Try again later."
 
-                response = requests.get(search_url, params=params, timeout=8)
-
-                # Check if we got a successful response
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-
-                        # Parse and format results
-                        if "results" in data and data["results"]:
-                            results = []
-                            for result in data["results"][
-                                :7
-                            ]:  # Limit to top 7 results for better context
-                                title = result.get("title", "No title")
-                                content = (
-                                    result.get("content", "")[:300] + "..."
-                                    if len(result.get("content", "")) > 300
-                                    else result.get("content", "")
-                                )
-                                url = result.get("url", "")
-                                results.append(f"• {title}: {content} ({url})")
-
-                            logger.info(f"web_search success: {instance} returned {len(data['results'])} results")
-                            return "\n".join(results)
-                        else:
-                            logger.info(f"web_search no results from {instance}")
-                            # Try next instance
-                            continue
-                    except ValueError:
-                        # JSON decode failed, try next instance
-                        logger.warning(f"web_search JSON decode failed from {instance}")
-                        continue
-                else:
-                    logger.info(f"web_search HTTP {response.status_code} from {instance}")
-                    # HTTP error, try next instance
-                    continue
-
-            except requests.exceptions.Timeout:
-                # Timeout, try next instance
-                logger.warning(f"web_search timeout from {instance}")
-                continue
-            except requests.exceptions.RequestException:
-                # Other request error, try next instance
-                logger.warning(f"web_search request error from {instance}")
-                continue
-            except Exception:
-                # Any other error, try next instance
-                logger.warning(f"web_search unknown error from {instance}")
-                continue
-
-        # If all instances failed, try HTML parsing as fallback
-        logger.warning("web_search all instances failed, trying HTML fallback")
-        return self._web_search_html_fallback(query, public_instances)
+        except requests.exceptions.Timeout:
+            logger.warning(f"web_search timeout")
+            return "Search timed out. Please try again."
+        except requests.exceptions.ConnectionError:
+            logger.error(f"web_search connection error - is SearXNG running on localhost:8086?")
+            return "Search service unavailable. Please try again later."
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"web_search request error: {e}")
+            return "Search request failed. Please try again."
+        except Exception as e:
+            logger.error(f"web_search unexpected error: {e}")
+            return "An error occurred during search. Please try again."
 
     def company_research(self, company_name: str) -> str:
-        """Comprehensive company research tool using public SearXNG instances with fallback mechanism"""
+        """Comprehensive company research tool using local SearXNG instance"""
         if not self._check_rate_limit("company_research"):
             return "Rate limit exceeded. Please wait before making another search."
 
-        # List of public SearXNG instances (fallback mechanism)
-        # Reduced list to speed up failover
-        public_instances = [
-            "https://searx.be",
-            "https://metacat.online",
-            "https://ooglester.com",
-        ]
+        # Use only localhost SearXNG instance for efficiency
+        instance = "http://localhost:8086"
 
-        # Shuffle the instances for better distribution
-        random.shuffle(public_instances)
+        try:
+            search_url = urljoin(instance, "search")
 
-        # Set overall timeout to prevent hanging
-        import time
-        start_time = time.time()
-        max_total_time = 20  # Maximum 20 seconds total
+            # Prepare search parameters for company research
+            params = {
+                "q": f"company {company_name}",
+                "format": "json",
+                "categories": "general",
+                "engines": "google,bing,duckduckgo,brave",
+                "language": "en-US",
+            }
 
-        # Try each instance until one works
-        for instance in public_instances:
-            # Check if we've exceeded max total time
-            if time.time() - start_time > max_total_time:
-                logger.warning(f"company_research exceeded max time, stopping")
-                break
+            response = self.session.get(search_url, params=params, timeout=10)
 
-            try:
-                # Use public SearXNG instance for company research
-                search_url = urljoin(instance, "search")
+            if response.status_code == 200:
+                try:
+                    data = response.json()
 
-                # Prepare search parameters for company research
-                params = {
-                    "q": f"company {company_name}",
-                    "format": "json",
-                    "categories": "general",
-                    "engines": "google,bing,duckduckgo,brave",
-                    "language": "en-US",
-                }
+                    if "results" in data and data["results"]:
+                        results = []
+                        for result in data["results"][:7]:
+                            title = result.get("title", "No title")
+                            content = result.get("content", "")
+                            if len(content) > 300:
+                                content = content[:300] + "..."
+                            url = result.get("url", "")
+                            results.append(f"• {title}: {content} ({url})")
 
-                response = requests.get(search_url, params=params, timeout=8)
+                        logger.info(f"company_research success: {len(data['results'])} results for '{company_name}'")
+                        return "\n".join(results)
+                    else:
+                        return f"No company information found for '{company_name}'."
+                except ValueError:
+                    return f"Error parsing company research results for '{company_name}'."
+            else:
+                return f"Search service returned error {response.status_code}. Try again later."
 
-                # Check if we got a successful response
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-
-                        # Parse and format results
-                        if "results" in data and data["results"]:
-                            results = []
-                            for result in data["results"][
-                                :7
-                            ]:  # Limit to top 7 results for better context
-                                title = result.get("title", "No title")
-                                content = (
-                                    result.get("content", "")[:300] + "..."
-                                    if len(result.get("content", "")) > 300
-                                    else result.get("content", "")
-                                )
-                                url = result.get("url", "")
-                                results.append(f"• {title}: {content} ({url})")
-
-                            return "\n".join(results)
-                        else:
-                            # Try next instance
-                            continue
-                    except ValueError:
-                        # JSON decode failed, try next instance
-                        continue
-                else:
-                    # HTTP error, try next instance
-                    continue
-
-            except requests.exceptions.Timeout:
-                # Timeout, try next instance
-                continue
-            except requests.exceptions.RequestException:
-                # Other request error, try next instance
-                continue
-            except Exception:
-                # Any other error, try next instance
-                continue
-
-        # If all instances failed, try HTML parsing as fallback
-        return self._web_search_html_fallback(
-            f"company {company_name}", public_instances
-        )
+        except requests.exceptions.Timeout:
+            return "Company research timed out. Please try again."
+        except requests.exceptions.ConnectionError:
+            logger.error(f"company_research connection error - is SearXNG running on localhost:8086?")
+            return "Search service unavailable. Please try again later."
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"company_research request error: {e}")
+            return "Company research request failed. Please try again."
+        except Exception as e:
+            logger.error(f"company_research unexpected error: {e}")
+            return "An error occurred during company research. Please try again."
 
     def crawling(self, url: str, max_characters: int = 3000) -> str:
         """Extracts content from specific URLs using direct web scraping"""
@@ -1547,12 +1629,8 @@ class ToolManager:
             return "Rate limit exceeded. Please wait before crawling another URL."
 
         try:
-            # Use direct requests for content extraction
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-
-            response = requests.get(url, headers=headers, timeout=15)
+            # Use session for content extraction (headers already set in session)
+            response = self.session.get(url, timeout=15)
             response.raise_for_status()
 
             # Use BeautifulSoup to parse HTML and extract text
@@ -1606,26 +1684,46 @@ class ToolManager:
             return f"Error generating image: {str(e)}"
 
     def analyze_image(self, image_url: str, prompt: str = "Describe this image") -> str:
-        """Analyze an image using Pollinations API vision capabilities with rate limiting"""
+        """Analyze an image using OpenRouter API vision capabilities with rate limiting"""
         if not self._check_rate_limit("analyze_image"):
             return "Rate limit exceeded. Please wait before analyzing another image."
 
         try:
-            # Import pollinations API here to avoid circular imports
-            from ai.pollinations import pollinations_api
+            from ai.openrouter import openrouter_api
 
-            # Analyze the image
-            result = pollinations_api.analyze_image(image_url, prompt)
+            payload = {
+                "model": "openai",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                        ],
+                    }
+                ],
+            }
 
-            # Check if there was an error
+            headers = {"Content-Type": "application/json"}
+
+            if openrouter_api.api_key:
+                headers["Authorization"] = f"Bearer {openrouter_api.api_key}"
+
+            response = self.session.post(
+                openrouter_api.api_url,
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+            response.raise_for_status()
+            result = response.json()
+
             if "error" in result:
                 error_msg = result["error"]
-                # Provide more helpful message for Tenor URLs
                 if "tenor.com" in image_url.lower():
                     return f"Cannot analyze Tenor GIF directly. Please provide a direct image URL (ending with .jpg, .png, .gif, etc.) instead of the Tenor page URL."
                 return f"Error analyzing image: {error_msg}"
 
-            # Extract the response text
             if "choices" in result and len(result["choices"]) > 0:
                 response_text = result["choices"][0]["message"]["content"]
                 return response_text
@@ -1707,8 +1805,8 @@ class ToolManager:
                 try:
                     tree = ast.parse(expr, mode="eval")
                     return _eval(tree.body)
-                except:
-                    raise ValueError("Invalid expression")
+                except (SyntaxError, TypeError, ValueError) as e:
+                    raise ValueError(f"Invalid expression: {e}")
 
             result = eval_expr(expression)
             return f"Result: {result}"
@@ -2245,6 +2343,167 @@ class ToolManager:
         except Exception as e:
             return f"Error getting Discord user roles: {str(e)}"
 
+    async def discord_kick_user(self, guild_id: str, user_id: str, reason: str = "", **kwargs) -> str:
+        """Kick a user from a specific guild"""
+        if not self._check_rate_limit("discord_kick_user"):
+            return "Rate limit exceeded for kick user request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.kick_user(guild_id, user_id, reason)
+            if "error" in result:
+                return f"Error kicking user: {result['error']}"
+
+            return f"✅ Successfully kicked user {result['user']} from {result['guild']}.\nReason: {result['reason'] or 'None provided'}"
+        except Exception as e:
+            return f"Error kicking user: {str(e)}"
+
+    async def discord_ban_user(self, guild_id: str, user_id: str, reason: str = "", delete_message_seconds: int = 0, **kwargs) -> str:
+        """Ban a user from a specific guild"""
+        if not self._check_rate_limit("discord_ban_user"):
+            return "Rate limit exceeded for ban user request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.ban_user(guild_id, user_id, reason, delete_message_seconds)
+            if "error" in result:
+                return f"Error banning user: {result['error']}"
+
+            return f"✅ Successfully banned user {result['user']} from {result['guild']}.\nReason: {result['reason'] or 'None provided'}"
+        except Exception as e:
+            return f"Error banning user: {str(e)}"
+
+    async def discord_unban_user(self, guild_id: str, user_id: str, reason: str = "", **kwargs) -> str:
+        """Unban a user from a specific guild"""
+        if not self._check_rate_limit("discord_unban_user"):
+            return "Rate limit exceeded for unban user request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.unban_user(guild_id, user_id, reason)
+            if "error" in result:
+                return f"Error unbanning user: {result['error']}"
+
+            return f"✅ Successfully unbanned user {result['user']} from {result['guild']}.\nReason: {result['reason'] or 'None provided'}"
+        except Exception as e:
+            return f"Error unbanning user: {str(e)}"
+
+    async def discord_timeout_user(self, guild_id: str, user_id: str, duration_minutes: int, reason: str = "", **kwargs) -> str:
+        """Timeout a user in a specific guild"""
+        if not self._check_rate_limit("discord_timeout_user"):
+            return "Rate limit exceeded for timeout user request."
+            
+        if kwargs:
+            # Log ignored arguments for debugging
+            pass
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.timeout_user(guild_id, user_id, duration_minutes, reason)
+            if "error" in result:
+                return f"Error timing out user: {result['error']}"
+
+            if result['duration_minutes'] > 0:
+                return f"✅ Successfully timed out user {result['user']} in {result['guild']} for {result['duration_minutes']} minutes.\nReason: {result['reason'] or 'None provided'}"
+            else:
+                return f"✅ Successfully removed timeout for user {result['user']} in {result['guild']}.\nReason: {result['reason'] or 'None provided'}"
+        except Exception as e:
+            return f"Error timing out user: {str(e)}"
+
+    async def discord_remove_timeout(self, guild_id: str, user_id: str, reason: str = "") -> str:
+        """Remove timeout from a user"""
+        if not self._check_rate_limit("discord_remove_timeout"):
+            return "Rate limit exceeded for remove timeout request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            # Calls timeout_user with duration 0 to remove timeout
+            result = await self.discord_tools.timeout_user(guild_id, user_id, 0, reason)
+            if "error" in result:
+                return f"Error removing timeout: {result['error']}"
+
+            return f"✅ Successfully removed timeout for user {result['user']} in {result['guild']}.\nReason: {result['reason'] or 'None provided'}"
+        except Exception as e:
+            return f"Error removing timeout: {str(e)}"
+
+    async def discord_purge_messages(self, channel_id: str, limit: int = 10, user_id: str = None) -> str:
+        """Purge messages from a channel"""
+        if not self._check_rate_limit("discord_purge_messages"):
+            return "Rate limit exceeded for purge messages request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.purge_messages(channel_id, limit, user_id)
+            if "error" in result:
+                return f"Error purging messages: {result['error']}"
+
+            return f"✅ Successfully purged {result['deleted_count']} messages in #{result['channel']}."
+        except Exception as e:
+            return f"Error purging messages: {str(e)}"
+
+    async def discord_pin_message(self, channel_id: str, message_id: str) -> str:
+        """Pin a message in a channel"""
+        if not self._check_rate_limit("discord_pin_message"):
+            return "Rate limit exceeded for pin message request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.pin_message(channel_id, message_id)
+            if "error" in result:
+                return f"Error pinning message: {result['error']}"
+
+            return f"✅ Successfully pinned message {result['message_id']} in #{result['channel']}."
+        except Exception as e:
+            return f"Error pinning message: {str(e)}"
+
+    async def discord_unpin_message(self, channel_id: str, message_id: str) -> str:
+        """Unpin a message in a channel"""
+        if not self._check_rate_limit("discord_unpin_message"):
+            return "Rate limit exceeded for unpin message request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.unpin_message(channel_id, message_id)
+            if "error" in result:
+                return f"Error unpinning message: {result['error']}"
+
+            return f"✅ Successfully unpinned message {result['message_id']} in #{result['channel']}."
+        except Exception as e:
+            return f"Error unpinning message: {str(e)}"
+
+    async def discord_delete_message(self, channel_id: str, message_id: str) -> str:
+        """Delete a single user message from a channel"""
+        if not self._check_rate_limit("discord_delete_message"):
+            return "Rate limit exceeded for delete message request."
+
+        try:
+            if self.discord_tools is None:
+                return "Discord tools not initialized. Bot may not be connected to Discord."
+
+            result = await self.discord_tools.delete_message(channel_id, message_id)
+            if "error" in result:
+                return f"Error deleting message: {result['error']}"
+
+            return f"✅ Successfully deleted message {result['message_id']} in {result['channel']}."
+        except Exception as e:
+            return f"Error deleting message: {str(e)}"
+
     def set_discord_tools(self, bot_client):
         """Initialize Discord tools with the bot client"""
         from .discord_tools import DiscordTools
@@ -2380,11 +2639,6 @@ class ToolManager:
             and "user_id" not in mapped_arguments
         ):
             mapped_arguments["user_id"] = user_id
-        elif (
-            tool_name in ["get_crypto_price", "get_stock_price"]
-            and "user_id" not in mapped_arguments
-        ):
-            mapped_arguments["user_id"] = user_id
 
         try:
             tool_func = self.tools[tool_name]
@@ -2401,7 +2655,6 @@ class ToolManager:
                 "check_balance",
                 "get_bonus_schedule",
                 "discord_search_messages",
-                "discord_read_channel",
                 "discord_list_guild_members",
             ]
 
@@ -2410,7 +2663,7 @@ class ToolManager:
                 import asyncio
                 import functools
 
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 # Use functools.partial to handle keyword arguments properly
                 partial_func = functools.partial(tool_func, **mapped_arguments)
                 return await loop.run_in_executor(None, partial_func)
