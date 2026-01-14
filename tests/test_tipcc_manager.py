@@ -7,6 +7,7 @@ import unittest
 import asyncio
 import sys
 import os
+from unittest.mock import Mock
 
 # Add the project root to the path so we can import modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -19,6 +20,8 @@ class MockBot:
     """Mock bot instance for testing"""
     def __init__(self):
         self.tool_manager = MockToolManager()
+        self.user = Mock()
+        self.user.id = 12345
 
 class MockToolManager:
     """Mock tool manager for testing"""
